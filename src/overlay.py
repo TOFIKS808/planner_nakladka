@@ -1,4 +1,5 @@
 import requests
+from src import api
 from PyQt6.QtWidgets import QWidget, QSlider, QPushButton, QLabel, QVBoxLayout, QCheckBox, QSpacerItem, QSizePolicy, QMessageBox, QApplication
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QFont, QMouseEvent, QCursor
 from PyQt6.QtCore import Qt, QRectF, pyqtProperty, QPropertyAnimation, QEasingCurve, QTimer
@@ -42,6 +43,11 @@ class OverlayWidget(QWidget):
         self.original_height = 100
         self.scale_factor = 1.0
         self.resize(self.original_width, self.original_height)
+
+        # Przenoszenie
+        self._drag_active = False
+        self._drag_position = None
+        self._was_clickthrough = False
 
         # Okno
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -102,7 +108,6 @@ class OverlayWidget(QWidget):
 
         # Checkbox click-through
         self.clickthrough_checkbox = QCheckBox("Pozwól klikać przez nakładkę")
-        self.clickthrough_checkbox.setChecked(True)
         self.clickthrough_checkbox.setStyleSheet("""
             QCheckBox { color: white; font-size: 13px; spacing: 8px; }
             QCheckBox::indicator { width: 18px; height: 18px; border-radius: 4px; border: 2px solid #3CB371; background-color: transparent; }
@@ -110,6 +115,15 @@ class OverlayWidget(QWidget):
         """)
         self.clickthrough_checkbox.stateChanged.connect(self.toggle_clickthrough_option)
         layout.addWidget(self.clickthrough_checkbox)
+
+        # Checkbox dragging
+        self.drag_checkbox = QCheckBox("Pozwól przenosić nakładkę")
+        self.drag_checkbox.setStyleSheet("""
+            QCheckBox { color: white; font-size: 13px; spacing: 8px; }
+            QCheckBox::indicator { width: 18px; height: 18px; border-radius: 4px; border: 2px solid #3CB371; background-color: transparent; }
+            QCheckBox::indicator:checked { background-color: #3CB371; border: 2px solid #2E8B57; }
+        """)
+        layout.addWidget(self.drag_checkbox)
 
         layout.addSpacerItem(QSpacerItem(10, 15, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
 
@@ -202,14 +216,12 @@ class OverlayWidget(QWidget):
             new_height = self.settings_panel.sizeHint().height() + 20
             self.setFixedHeight(new_height)
             self.setFixedWidth(self.settings_panel.sizeHint().width())
-            panel_width = self.settings_panel.width()
-            self.settings_panel.move(max(0, self.width() - panel_width), 0)
+            self.settings_panel.move(0, 0)
             self.settings_panel.show()
         else:
             self.settings_panel.hide()
             self.setFixedHeight(int(self.original_height * self.scale_factor))
             self.setFixedWidth(int(self.original_width * self.scale_factor))
-            self.reposition()
             if self.clickthrough_checkbox.isChecked():
                 self.enable_clickthrough()
             else:
@@ -283,8 +295,8 @@ class OverlayWidget(QWidget):
         painter.fillPath(guide_path, QColor(100, 100, 100))
 
         # --- Zielony pasek postępu ---
-        progress_width = rect.width() * self._progress
-        if self._progress > 0:
+        progress_width = int(rect.width() * max(0.0, min(1.0, self._progress)))
+        if progress_width > 0:
             progress_path = QPainterPath()
             progress_path.moveTo(rect.x(), rect.y() + bar_height)
             progress_path.lineTo(rect.x(), rect.y() + radius_scaled)
@@ -319,9 +331,41 @@ class OverlayWidget(QWidget):
         painter.setFont(QFont("Segoe UI Symbol", int(16 * self.scale_factor)))
         painter.drawText(self.gear_rect, Qt.AlignmentFlag.AlignCenter, "⚙️")
 
+    # ===== Drag & Drop =====
     def mousePressEvent(self, event: QMouseEvent):
         if hasattr(self, "gear_rect") and self.gear_rect.contains(event.position()):
             self.toggle_settings()
+            event.accept()
+            return
+
+        if self.drag_checkbox.isChecked() and event.button() == Qt.MouseButton.LeftButton:
+            self._drag_active = True
+            self._drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self._was_clickthrough = self.clickthrough_checkbox.isChecked()
+            self.disable_clickthrough()
+            event.accept()
+
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if self._drag_active and event.buttons() & Qt.MouseButton.LeftButton:
+            self.move(event.globalPosition().toPoint() - self._drag_position)
+            event.accept()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if self._drag_active and event.button() == Qt.MouseButton.LeftButton:
+            self._drag_active = False
+            self._drag_position = None
+
+            if self.clickthrough_checkbox.isChecked():
+                self.enable_clickthrough()
+            else:
+                self.disable_clickthrough()
+
+            self.save_settings()
+            event.accept()
+        super().mouseReleaseEvent(event)
 
     # ===== Zapis / Odczyt =====
     def load_settings(self):
@@ -330,23 +374,44 @@ class OverlayWidget(QWidget):
                 return
             with open(self.config_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+
             opacity = data.get("opacity", 1.0)
             scale = data.get("scale", 1.0)
             clickthrough = data.get("clickthrough", True)
+            drag_enabled = data.get("drag_enabled", False)
+            pos = data.get("position", None)
 
+            # Ustawienia
             self.setWindowOpacity(opacity)
             self.scale_factor = scale
-            self._clickthrough_enabled = clickthrough
 
             if hasattr(self, "opacity_slider"):
+                self.opacity_slider.blockSignals(True)
                 self.opacity_slider.setValue(int(opacity * 100))
+                self.opacity_slider.blockSignals(False)
+
             if hasattr(self, "scale_slider"):
                 self.scale_slider.blockSignals(True)
                 self.scale_slider.setValue(int(scale * 100))
                 self.scale_slider.blockSignals(False)
                 self.update_scale(int(scale * 100))
+
             if hasattr(self, "clickthrough_checkbox"):
+                self.clickthrough_checkbox.blockSignals(True)
                 self.clickthrough_checkbox.setChecked(clickthrough)
+                self.clickthrough_checkbox.blockSignals(False)
+                if clickthrough:
+                    self.enable_clickthrough()
+                else:
+                    self.disable_clickthrough()
+
+            if hasattr(self, "drag_checkbox"):
+                self.drag_checkbox.blockSignals(True)
+                self.drag_checkbox.setChecked(drag_enabled)
+                self.drag_checkbox.blockSignals(False)
+
+            if pos:
+                self.move(pos[0], pos[1])
 
         except Exception as e:
             print("Błąd podczas wczytywania ustawień:", e)
@@ -355,7 +420,9 @@ class OverlayWidget(QWidget):
         data = {
             "opacity": self.windowOpacity(),
             "scale": self.scale_factor,
-            "clickthrough": self.clickthrough_checkbox.isChecked()
+            "clickthrough": self.clickthrough_checkbox.isChecked(),
+            "drag_enabled": self.drag_checkbox.isChecked(),
+            "position": [self.x(), self.y()]
         }
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
@@ -373,45 +440,38 @@ class OverlayWidget(QWidget):
             QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            # Zatrzymanie timera kursora
+            self.save_settings()
             if hasattr(self, 'cursor_timer') and self.cursor_timer.isActive():
                 self.cursor_timer.stop()
-            
-            # Zatrzymanie timera aktualizacji API, jeśli istnieje
             if hasattr(self, 'update_timer') and self.update_timer.isActive():
                 self.update_timer.stop()
-            
-            # Usunięcie wszystkich hotkeyów keyboard
             keyboard.unhook_all_hotkeys()
-            
-            # Zamknięcie całej aplikacji
             QApplication.quit()
 
     # ===== API =====
-    def start_minute_updates(self, api_url):
-        self.api_url = api_url
+    def start_minute_updates(self):
         self.update_timer = QTimer(self)
         self.update_timer.timeout.connect(self.minute_update)
         self.update_timer.start(60 * 1000)
         self.minute_update()
 
     def minute_update(self):
-        try:
-            response = requests.get(self.api_url, timeout=10)
-            data = response.json()
-        except Exception as e:
-            print("Błąd pobierania danych z API:", e)
+        currentLesson = api.get_current_lesson()
+        nextLesson = api.get_next_lesson()
+        if not currentLesson:
             return
-        self.title = data.get("name", self.title)
-        self.left_text = data.get("username", self.left_text) + " → |"
-        self.right_text = data.get("email", self.right_text)
-        progress = float(data.get("address", {}).get("geo", {}).get("lng", 0)) / 100
+        self.title = currentLesson.get("syllabus", self.title)
+        self.left_text = str(round(currentLesson.get("remaining_time", self.left_text))) + "min → " + (nextLesson.get("syllabus", "") if nextLesson else "Przerwa")
+        self.right_text = nextLesson.get("hall", self.right_text) if nextLesson else "-"
+        progress = float((45-float(currentLesson.get("remaining_time")))) / 45.0
         self.animateProgressTo(progress)
         self.update()
 
     # ===== Reposition =====
     def reposition(self, margin_x=30, margin_y=30):
-        screen_geo = QGuiApplication.primaryScreen().availableGeometry()
+        screen = QGuiApplication.screenAt(self.pos()) or QGuiApplication.primaryScreen()
+        screen_geo = screen.availableGeometry()
         new_x = screen_geo.width() - self.width() - margin_x
         new_y = margin_y
         self.move(new_x, new_y)
+        self.save_settings()  # zapis pozycji od razu

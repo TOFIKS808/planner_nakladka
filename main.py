@@ -18,12 +18,11 @@ if __name__ == "__main__":
     # pozycja w prawym górnym rogu
     screen = app.primaryScreen()
     geo = screen.availableGeometry()
-    overlay.move(geo.width() - overlay.width() - 30, 30)
     overlay.show()
 
     # 🔄 animacja paska
     overlay.animateProgressTo(0.25)
 
-    overlay.start_minute_updates("https://jsonplaceholder.typicode.com/users/1")
+    overlay.start_minute_updates()
 
     sys.exit(app.exec())

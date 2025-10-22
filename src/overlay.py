@@ -1,6 +1,6 @@
 import requests
 from src import api
-from PyQt6.QtWidgets import QWidget, QSlider, QPushButton, QLabel, QVBoxLayout, QCheckBox, QSpacerItem, QSizePolicy, QMessageBox, QApplication
+from PyQt6.QtWidgets import QWidget, QSlider, QPushButton, QLabel, QVBoxLayout, QCheckBox, QSpacerItem, QSizePolicy, QMessageBox, QApplication, QRadioButton, QButtonGroup, QHBoxLayout
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QFont, QMouseEvent, QCursor
 from PyQt6.QtCore import Qt, QRectF, pyqtProperty, QPropertyAnimation, QEasingCurve, QTimer
 from PyQt6.QtGui import QGuiApplication
@@ -125,6 +125,77 @@ class OverlayWidget(QWidget):
         """)
         layout.addWidget(self.drag_checkbox)
 
+        # Grupy zajęciowe
+        layout.addSpacerItem(QSpacerItem(10, 15, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
+        self.group_c = QButtonGroup(self)
+        rb_c = [
+            QRadioButton("11K1"),
+            QRadioButton("11K2")
+        ]
+        for w in range(0, len(rb_c), 3):
+            row = QHBoxLayout()
+            row.addStretch()
+            for i in rb_c[w:w + 3]:
+                row.addWidget(i)
+                self.group_c.addButton(i)
+                i.setStyleSheet("""
+                    QRadioButton { color: white; font-size: 13px; spacing: 8px; }
+                    QRadioButton::indicator { width: 18px; height: 18px;
+                    border-radius: 9px; border: 2px solid #3CB371; background-color: transparent; }
+                    QRadioButton::indicator:checked { background-color: #3CB371; border: 2px solid #2E8B57; }
+                """)
+            row.addStretch()
+            layout.addLayout(row)
+
+        layout.addSpacerItem(QSpacerItem(10, 15, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
+        self.group_l = QButtonGroup(self)
+        rb_l = [
+            QRadioButton("L01"),
+            QRadioButton("L02"),
+            QRadioButton("L03"),
+            QRadioButton("L04"),
+            QRadioButton("L05")
+        ]
+        for w in range(0, len(rb_l), 3):
+            row = QHBoxLayout()
+            row.addStretch()
+            for i in rb_l[w:w + 3]:
+                row.addWidget(i)
+                self.group_l.addButton(i)
+                i.setStyleSheet("""
+                    QRadioButton { color: white; font-size: 13px; spacing: 8px; }
+                    QRadioButton::indicator { width: 18px; height: 18px;
+                    border-radius: 9px; border: 2px solid #3CB371; background-color: transparent; }
+                    QRadioButton::indicator:checked { background-color: #3CB371; border: 2px solid #2E8B57; }
+                """)
+            row.addStretch()
+            layout.addLayout(row)
+
+        layout.addSpacerItem(QSpacerItem(10, 15, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
+        self.group_k = QButtonGroup(self)
+        rb_k = [
+            QRadioButton("K01"),
+            QRadioButton("K02"),
+            QRadioButton("K03"),
+            QRadioButton("K04")
+        ]
+
+        for w in range(0, len(rb_k), 2):
+            row = QHBoxLayout()
+            row.addStretch()
+            for i in rb_k[w:w + 3]:
+                row.addWidget(i)
+                self.group_k.addButton(i)
+                i.setStyleSheet("""
+                    QRadioButton { color: white; font-size: 13px; spacing: 8px; }
+                    QRadioButton::indicator { width: 18px; height: 18px;
+                    border-radius: 9px; border: 2px solid #3CB371; background-color: transparent; }
+                    QRadioButton::indicator:checked { background-color: #3CB371; border: 2px solid #2E8B57; }
+                """)
+            row.addStretch()
+            layout.addLayout(row)
+        
+        # Przycisk powrotu
         layout.addSpacerItem(QSpacerItem(10, 15, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
 
         self.back_button = QPushButton("← Powrót")
@@ -226,6 +297,7 @@ class OverlayWidget(QWidget):
                 self.enable_clickthrough()
             else:
                 self.disable_clickthrough()
+        self.save_settings()
         self.update()
 
     # ===== Toggle widoczności =====
@@ -380,7 +452,7 @@ class OverlayWidget(QWidget):
             clickthrough = data.get("clickthrough", True)
             drag_enabled = data.get("drag_enabled", False)
             pos = data.get("position", None)
-
+            
             # Ustawienia
             self.setWindowOpacity(opacity)
             self.scale_factor = scale
@@ -413,6 +485,11 @@ class OverlayWidget(QWidget):
             if pos:
                 self.move(pos[0], pos[1])
 
+            # Grupy radiobutton
+            self.set_checked_label(self.group_c, data.get("group_c"))
+            self.set_checked_label(self.group_l, data.get("group_l"))
+            self.set_checked_label(self.group_k, data.get("group_k"))
+
         except Exception as e:
             print("Błąd podczas wczytywania ustawień:", e)
 
@@ -422,7 +499,10 @@ class OverlayWidget(QWidget):
             "scale": self.scale_factor,
             "clickthrough": self.clickthrough_checkbox.isChecked(),
             "drag_enabled": self.drag_checkbox.isChecked(),
-            "position": [self.x(), self.y()]
+            "position": [self.x(), self.y()],
+            "group_c": self.get_checked_label(self.group_c),
+            "group_l": self.get_checked_label(self.group_l),
+            "group_k": self.get_checked_label(self.group_k)
         }
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
@@ -452,20 +532,51 @@ class OverlayWidget(QWidget):
     def start_minute_updates(self):
         self.update_timer = QTimer(self)
         self.update_timer.timeout.connect(self.minute_update)
-        self.update_timer.start(60 * 1000)
+        self.update_timer.start(20 * 1000)
         self.minute_update()
 
     def minute_update(self):
-        currentLesson = api.get_current_lesson()
-        nextLesson = api.get_next_lesson()
-        if not currentLesson:
+        currentLesson = api.get_current_lesson() or {"syllabus": "Brak zajęć", "remaining_time": 0, "lessonType": "", "classGroup": "", "hallGroup": ""}
+        nextLesson = api.get_next_lesson() or {"syllabus": "Brak dalszych zajęć", "hall": "-", "lessonType": "", "classGroup": "", "hallGroup": ""}
+
+        # Pobieramy zaznaczone typy L/C/K
+        selected_l = self.get_checked_label(self.group_l)
+        selected_c = self.get_checked_label(self.group_c)
+        selected_k = self.get_checked_label(self.group_k)
+
+        # Funkcja sprawdzająca czy lekcja jest do wyświetlenia
+        def lesson_allowed(lesson):
+            if not lesson:
+                return False
+            return (lesson.get("lessonType", "") in [selected_l, ""]) or \
+                (lesson.get("classGroup", "") in [selected_c, ""]) or \
+                (lesson.get("hallGroup", "") in [selected_k, ""])
+
+        if not lesson_allowed(currentLesson):
+            self.title = ""
+            self.left_text = ""
+            self.right_text = ""
+            self.animateProgressTo(0.0)
+            self.update()
             return
-        self.title = currentLesson.get("syllabus", self.title)
-        self.left_text = str(round(currentLesson.get("remaining_time", self.left_text))) + "min → " + (nextLesson.get("syllabus", "") if nextLesson else "Przerwa")
-        self.right_text = nextLesson.get("hall", self.right_text) if nextLesson else "-"
-        progress = float((45-float(currentLesson.get("remaining_time")))) / 45.0
+
+        self.title = currentLesson.get("syllabus", "Brak zajęć")
+        remaining_time = currentLesson.get("remaining_time", 0)
+
+        # Kolejna lekcja tylko jeśli spełnia kryteria
+        if lesson_allowed(nextLesson):
+            next_syllabus = nextLesson.get("syllabus", "Brak dalszych zajęć")
+            next_hall = nextLesson.get("hall", "-")
+        else:
+            next_syllabus = "Przerwa"
+            next_hall = "-"
+
+        self.left_text = f"{round(remaining_time)}min → {next_syllabus}"
+        self.right_text = next_hall
+        progress = float((45 - float(remaining_time))) / 45.0
         self.animateProgressTo(progress)
         self.update()
+
 
     # ===== Reposition =====
     def reposition(self, margin_x=30, margin_y=30):
@@ -475,3 +586,15 @@ class OverlayWidget(QWidget):
         new_y = margin_y
         self.move(new_x, new_y)
         self.save_settings()  # zapis pozycji od razu
+
+    def get_checked_label(self, button_group):
+        checked = button_group.checkedButton()
+        return checked.text() if checked else None
+
+    def set_checked_label(self, button_group, label):
+        if not label:
+            return
+        for btn in button_group.buttons():
+            if btn.text() == label:
+                btn.setChecked(True)
+                break

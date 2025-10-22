@@ -38,7 +38,7 @@ def get_current_lesson():
         cel_dzis = teraz.replace(hour=cel.hour, minute=cel.minute, second=0, microsecond=0)
         return {"syllabus": "Przerwa", "remaining_time": round((cel_dzis - teraz).total_seconds() / 60, 2), "hall": "-"}
     for lesson in responce:
-        if lesson['day'] == datetime.now().weekday() and lesson['hour'] == current['id']:
+        if lesson['day'] == datetime.now().weekday()+1 and lesson['hour'] == current['id']:
             cel = datetime.strptime(current['end'], "%H:%M")
             teraz = datetime.now()
             cel_dzis = teraz.replace(hour=cel.hour, minute=cel.minute, second=0, microsecond=0)
@@ -62,9 +62,9 @@ def get_next_lesson():
     responce = fetch_timetable("https://planzajecpk.app/api/timetable/a")
     current = get_current_hour()
     if not current or not responce:
-        return None
+        return {"syllabus": "Brak dalszych zajęć", "hall": "-"}
     next_id = current['id'] + 1
     for lesson in responce:
-        if lesson['day'] == datetime.now().weekday() and lesson['hour'] == next_id:
+        if lesson['day'] == datetime.now().weekday()+1 and lesson['hour'] == next_id:
             return lesson
         

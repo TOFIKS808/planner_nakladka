@@ -6,7 +6,6 @@ from PyQt6.QtCore import Qt, QRectF, pyqtProperty, QPropertyAnimation, QEasingCu
 from PyQt6.QtGui import QGuiApplication
 import keyboard
 import json, os
-from datetime import datetime
 
 class OverlayWidget(QWidget):
     def __init__(self, title, left_text, right_text, progress=0.0):
@@ -103,9 +102,12 @@ class OverlayWidget(QWidget):
         # Referencja do tray
         self.tray = None
 
-        # Timer dla aktualizacji
+        # Timery dla aktualizacji
         self.update_timer = QTimer(self)
         self.update_timer.timeout.connect(self.minute_update)
+        
+        self.progress_timer = QTimer(self)
+        self.progress_timer.timeout.connect(self.fast_progress_update)
 
     # ===== Clickthrough =====
     def enable_clickthrough(self):
@@ -589,17 +591,23 @@ class OverlayWidget(QWidget):
 
     # ===== API =====
     def start_minute_updates(self):
-        """Rozpoczyna okresowe aktualizacje co minutę"""
-        self.update_timer.start(20 * 1000)  # 20 sekund
+        """Rozpoczyna okresowe aktualizacje"""
+        # Timer dla aktualizacji danych co minutę
+        self.update_timer.start(60 * 1000)  # 1 minuta
+        
+        # Timer dla płynnego odświeżania progress bara co 5 sekund
+        self.progress_timer.start(5000)  # 5 sekund
+        
         # Od razu wykonaj pierwszą aktualizację
         self.minute_update()
 
     def minute_update(self):
+        """Aktualizuje wszystkie dane co minutę"""
         # UŻYJ USTAWIEN Z CACHE zamiast wczytywać z pliku        
         current_hour_obj = api.get_current_hour()
         
-        # PRZEKAŻ USTAWIENIA Z CACHE DO FUNKCJI API
-        currentLesson = api.get_current_lesson(self._settings_cache) or {
+        # PRZEKAŻ USTAWIENIA Z CACHE DO FUNKCJI API - użyj nowej funkcji z pełnym łączeniem
+        currentLesson = api.get_current_lesson_with_full_block(self._settings_cache) or {
             "syllabus": "Brak zajęć", 
             "remaining_time": 0, 
             "total_duration": 45, 
@@ -620,22 +628,39 @@ class OverlayWidget(QWidget):
         # Jeśli następna lekcja ma tę samą nazwę, znajdź prawdziwą następną lekcję
         if (current_syllabus == next_syllabus and 
             current_syllabus not in ["Brak zajęć", "Przerwa", "Brak dalszych zajęć", "Koniec zajęć"]):
-            nextLesson = self.find_real_next_lesson(current_hour_obj, current_syllabus) or {
+            nextLesson = api.get_real_next_lesson(current_hour_obj, current_syllabus, self._settings_cache) or {
                 "syllabus": "Brak dalszych zajęć", 
                 "hall": "-"
             }
 
         self.title = currentLesson.get("syllabus", "Brak zajęć")
-        remaining_time = currentLesson.get("remaining_time", 0)
-        total_duration = currentLesson.get("total_duration", 45)
-
-        self.left_text = f"{round(remaining_time)}min → {nextLesson.get('syllabus', '-')}"
-        self.right_text = nextLesson.get("hall", "-")
-
-        # POPRAWIONE OBLICZANIE PROGRESU - UWZGLĘDNIA PRZERWY
-        is_break = currentLesson.get("is_break", False)
-        time_elapsed = currentLesson.get("time_elapsed", 0)
         
+        # ZAPISZ DANE JAKO ATRYBUTY DLA SZYBKIEGO ODŚWIEŻANIA
+        self.currentLesson = currentLesson
+        self.nextLesson = nextLesson
+        
+        # Zaktualizuj progress bar od razu
+        self.update_progress()
+
+    def fast_progress_update(self):
+        """Szybka aktualizacja tylko progress bara"""
+        if hasattr(self, 'currentLesson'):
+            self.update_progress()
+
+    def update_progress(self):
+        """Aktualizuje progress bar - teraz proste obliczenia"""
+        if not hasattr(self, 'currentLesson'):
+            return
+            
+        remaining_time = self.currentLesson.get("remaining_time", 0)
+        total_duration = self.currentLesson.get("total_duration", 45)
+        time_elapsed = self.currentLesson.get("time_elapsed", 0)
+        is_break = self.currentLesson.get("is_break", False)
+
+        self.left_text = f"{round(remaining_time)}min → {self.nextLesson.get('syllabus', '-')}"
+        self.right_text = self.nextLesson.get("hall", "-")
+
+        # OBLICZANIE PROGRESU
         if is_break:
             # Dla przerwy: progres = czas który minął / całkowity czas przerwy
             if total_duration > 0:
@@ -643,50 +668,15 @@ class OverlayWidget(QWidget):
             else:
                 progress = 0.0
         else:
-            # Dla lekcji: progres = 1 - (pozostały czas / całkowity czas)
+            # Dla lekcji: progres = czas który minął / całkowity czas bloku
             if total_duration > 0:
-                progress = 1.0 - (float(remaining_time) / float(total_duration))
+                progress = time_elapsed / total_duration
             else:
                 progress = 0.0
         
         progress = max(0.0, min(1.0, progress))
         
-        self.animateProgressTo(progress)
-        self.update()
-
-    def find_real_next_lesson(self, current_hour_obj, current_syllabus):
-        """Znajduje prawdziwą następną lekcję pomijając połączone lekcje o tej samej nazwie"""
-        try:
-            response = api.fetch_timetable("https://planzajecpk.app/api/timetable/a")
-            if not response:
-                return {"syllabus": "Brak dalszych zajęć", "hall": "-"}
-            
-            current_hour_id = current_hour_obj.get('id') if current_hour_obj else None
-            
-            # Zacznij szukanie od następnej godziny po aktualnej
-            next_hour_obj = api.get_next_hour(current_hour_id)
-            
-            # Szukaj pierwszej lekcji która NIE ma tej samej nazwy co aktualna
-            while next_hour_obj:
-                for lesson in response:
-                    if (lesson['day'] == datetime.now().weekday() + 1 and 
-                        lesson['hour'] == next_hour_obj['id'] and
-                        lesson.get('syllabus') != current_syllabus):
-                        
-                        # Sprawdź czy lekcja pasuje do filtrów
-                        if api.is_lesson_matching_filters(lesson, 
-                                                        self._settings_cache.get("group_l"),
-                                                        self._settings_cache.get("group_k")):
-                            return lesson
-                
-                # Przejdź do następnej godziny
-                next_hour_obj = api.get_next_hour(next_hour_obj['id'])
-            
-            return {"syllabus": "Koniec zajęć", "hall": "-"}
-            
-        except Exception as e:
-            print(f"Błąd podczas znajdowania następnych zajęć: {e}")
-            return {"syllabus": "Brak dalszych zajęć", "hall": "-"}
+        self.setProgress(progress)
 
     # ===== Zamknięcie programu =====
     def confirm_close(self):
@@ -703,5 +693,7 @@ class OverlayWidget(QWidget):
                 self.cursor_timer.stop()
             if hasattr(self, 'update_timer') and self.update_timer.isActive():
                 self.update_timer.stop()
+            if hasattr(self, 'progress_timer') and self.progress_timer.isActive():
+                self.progress_timer.stop()
             keyboard.unhook_all_hotkeys()
             QApplication.quit()

@@ -62,19 +62,19 @@ def calculate_break_info(current_hour_obj, next_hour_obj):
         break_duration = (next_start - break_start_time).total_seconds() / 60
         
         remaining_time = max(0, (next_start - now).total_seconds() / 60)
-        time_elapsed = max(0, min(time_elapsed, break_duration))  # Nie pozwól żeby czas był ujemny lub większy niż break_duration
-        
+        time_elapsed = max(0, min(time_elapsed, break_duration))
+
         return {
             "syllabus": "Przerwa",
             "remaining_time": round(remaining_time, 2),
             "break_duration": round(break_duration, 2),
-            "time_elapsed": round(time_elapsed, 2),  # Dodajemy czas który już minął
+            "time_elapsed": round(time_elapsed, 2),
             "hall": "-",
             "lessonType": "",
             "classGroup": "",
             "hallGroup": "",
             "total_duration": round(break_duration, 2),
-            "is_break": True  # Flaga wskazująca że to przerwa
+            "is_break": True
         }
     except (KeyError, ValueError, TypeError) as e:
         print(f"Błąd obliczania przerwy: {e}")
@@ -124,8 +124,8 @@ def load_settings():
         print(f"Błąd wczytywania ustawień: {e}")
         return {}
 
-def get_consecutive_lessons(initial_lesson):
-    """Znajduje wszystkie kolejne lekcje tworzące blok (ta sama nazwa, sala i typ)"""
+def get_full_lesson_block(initial_lesson):
+    """Znajduje CAŁY blok lekcji - zarówno wstecz jak i do przodu"""
     try:
         response = fetch_timetable("https://planzajecpk.app/api/timetable/a")
         if not response:
@@ -137,9 +137,33 @@ def get_consecutive_lessons(initial_lesson):
         hall = initial_lesson['hall']
         lesson_type = initial_lesson.get('lessonType', '')
         
-        consecutive_lessons = [initial_lesson]
+        # Znajdź wszystkie lekcje w bloku
+        full_block = []
         
-        # Szukaj kolejnych lekcji w następnych godzinach
+        # 1. SZUKAJ WSTECZ - znajdź poprzednie lekcje w bloku
+        prev_hour = current_hour - 1
+        previous_lessons = []
+        
+        while True:
+            found_prev = False
+            for lesson in response:
+                if (lesson['day'] == day and lesson['hour'] == prev_hour and
+                    lesson['syllabus'] == syllabus and lesson['hall'] == hall and
+                    lesson.get('lessonType', '') == lesson_type):
+                    
+                    previous_lessons.insert(0, lesson)
+                    prev_hour -= 1
+                    found_prev = True
+                    break
+            
+            if not found_prev:
+                break
+        
+        # 2. DODAJ POPRZEDNIE LEKCJE + AKTUALNĄ + NASTĘPNE
+        full_block.extend(previous_lessons)
+        full_block.append(initial_lesson)
+        
+        # 3. SZUKAJ DO PRZODU - znajdź następne lekcje w bloku
         next_hour = current_hour + 1
         while True:
             found_next = False
@@ -148,7 +172,7 @@ def get_consecutive_lessons(initial_lesson):
                     lesson['syllabus'] == syllabus and lesson['hall'] == hall and
                     lesson.get('lessonType', '') == lesson_type):
                     
-                    consecutive_lessons.append(lesson)
+                    full_block.append(lesson)
                     next_hour += 1
                     found_next = True
                     break
@@ -156,30 +180,32 @@ def get_consecutive_lessons(initial_lesson):
             if not found_next:
                 break
         
-        return consecutive_lessons
+        return full_block
+        
     except Exception as e:
-        print(f"Błąd podczas znajdowania kolejnych lekcji: {e}")
+        print(f"Błąd podczas znajdowania pełnego bloku lekcji: {e}")
         return [initial_lesson]
 
-def calculate_total_remaining_time(consecutive_lessons, current_hour_obj):
-    """Oblicza całkowity pozostały czas dla bloku lekcji"""
+def calculate_block_remaining_time(lesson_block):
+    """Oblicza całkowity pozostały czas do końca bloku lekcji"""
     try:
+        if not lesson_block:
+            return 0
+            
         now = datetime.now()
-        
-        # Jeśli to przerwa
-        if consecutive_lessons[0].get('syllabus') == 'Przerwa':
-            return consecutive_lessons[0].get('remaining_time', 0)
         
         # Pobierz godziny z API
         hours_response = requests.get("https://planzajecpk.app/api/hours")
         hours_response.raise_for_status()
         hours_data = hours_response.json()
         
-        # Znajdź godzinę końca ostatniej lekcji w bloku
-        last_lesson_hour_id = consecutive_lessons[-1]['hour']
+        # Znajdź godzinę końca OSTATNIEJ lekcji w bloku
+        last_lesson = lesson_block[-1]
+        last_hour_id = last_lesson['hour']
+        
         last_hour_obj = None
         for hour_obj in hours_data:
-            if hour_obj['id'] == last_lesson_hour_id:
+            if hour_obj['id'] == last_hour_id:
                 last_hour_obj = hour_obj
                 break
         
@@ -191,16 +217,64 @@ def calculate_total_remaining_time(consecutive_lessons, current_hour_obj):
             year=now.year, month=now.month, day=now.day
         )
         
-        remaining_seconds = (end_time - now).total_seconds()
-        return round(max(0, remaining_seconds / 60), 2)
+        remaining_seconds = max(0, (end_time - now).total_seconds())
+        return round(remaining_seconds / 60, 2)
         
     except Exception as e:
-        print(f"Błąd obliczania całkowitego czasu: {e}")
+        print(f"Błąd obliczania pozostałego czasu bloku: {e}")
         return 0
 
-def calculate_lesson_time_elapsed(consecutive_lessons, current_hour_obj):
-    """Oblicza czas jaki już minął od początku bloku lekcji"""
+def calculate_block_total_duration(lesson_block):
+    """Oblicza całkowity czas trwania bloku lekcji"""
     try:
+        if not lesson_block:
+            return 45
+            
+        # Pobierz godziny z API
+        hours_response = requests.get("https://planzajecpk.app/api/hours")
+        hours_response.raise_for_status()
+        hours_data = hours_response.json()
+        
+        # Znajdź godzinę rozpoczęcia PIERWSZEJ lekcji w bloku
+        first_lesson = lesson_block[0]
+        first_hour_id = first_lesson['hour']
+        
+        first_hour_obj = None
+        for hour_obj in hours_data:
+            if hour_obj['id'] == first_hour_id:
+                first_hour_obj = hour_obj
+                break
+        
+        # Znajdź godzinę końca OSTATNIEJ lekcji w bloku
+        last_lesson = lesson_block[-1]
+        last_hour_id = last_lesson['hour']
+        
+        last_hour_obj = None
+        for hour_obj in hours_data:
+            if hour_obj['id'] == last_hour_id:
+                last_hour_obj = hour_obj
+                break
+        
+        if not first_hour_obj or not last_hour_obj:
+            return len(lesson_block) * 45
+        
+        # Oblicz całkowity czas trwania bloku
+        start_time = datetime.strptime(first_hour_obj['start'], "%H:%M")
+        end_time = datetime.strptime(last_hour_obj['end'], "%H:%M")
+        
+        total_minutes = (end_time.hour * 60 + end_time.minute) - (start_time.hour * 60 + start_time.minute)
+        return max(total_minutes, len(lesson_block) * 45)
+        
+    except Exception as e:
+        print(f"Błąd obliczania całkowitego czasu bloku: {e}")
+        return len(lesson_block) * 45
+
+def calculate_block_elapsed_time(lesson_block):
+    """Oblicza czas który już minął od początku bloku lekcji"""
+    try:
+        if not lesson_block:
+            return 0
+            
         now = datetime.now()
         
         # Pobierz godziny z API
@@ -208,30 +282,33 @@ def calculate_lesson_time_elapsed(consecutive_lessons, current_hour_obj):
         hours_response.raise_for_status()
         hours_data = hours_response.json()
         
-        # Znajdź godzinę rozpoczęcia pierwszej lekcji w bloku
-        first_lesson_hour_id = consecutive_lessons[0]['hour']
+        # Znajdź godzinę rozpoczęcia PIERWSZEJ lekcji w bloku
+        first_lesson = lesson_block[0]
+        first_hour_id = first_lesson['hour']
+        
         first_hour_obj = None
         for hour_obj in hours_data:
-            if hour_obj['id'] == first_lesson_hour_id:
+            if hour_obj['id'] == first_hour_id:
                 first_hour_obj = hour_obj
                 break
         
         if not first_hour_obj:
             return 0
         
-        # Oblicz czas od początku pierwszej lekcji
+        # Oblicz czas od początku pierwszej lekcji w bloku
         start_time = datetime.strptime(first_hour_obj['start'], "%H:%M").replace(
             year=now.year, month=now.month, day=now.day
         )
         
-        time_elapsed = (now - start_time).total_seconds() / 60
-        return round(max(0, time_elapsed), 2)
+        elapsed_seconds = max(0, (now - start_time).total_seconds())
+        return round(elapsed_seconds / 60, 2)
         
     except Exception as e:
-        print(f"Błąd obliczania czasu lekcji: {e}")
+        print(f"Błąd obliczania czasu który minął: {e}")
         return 0
 
-def get_current_lesson(settings=None):
+def get_current_lesson_with_full_block(settings=None):
+    """Pobiera aktualną lekcję z pełnym łączeniem wstecznym"""
     if settings is None:
         settings = load_settings()
     
@@ -261,7 +338,6 @@ def get_current_lesson(settings=None):
             remaining_time = round(max(0, (next_start - now).total_seconds() / 60), 2)
             total_duration = max(1, remaining_time)
             
-            # Dla przerwy przed pierwszą lekcją, time_elapsed = 0 (dopiero zaczyna się przerwa)
             return {
                 "syllabus": "Przerwa",
                 "remaining_time": remaining_time,
@@ -298,19 +374,23 @@ def get_current_lesson(settings=None):
             if not is_lesson_matching_filters(lesson, group_l, group_k):
                 continue
             
-            # Znajdź wszystkie kolejne lekcji tworzące blok
-            consecutive_lessons = get_consecutive_lessons(lesson)
-            total_remaining_time = calculate_total_remaining_time(consecutive_lessons, current_hour_obj)
-            time_elapsed = calculate_lesson_time_elapsed(consecutive_lessons, current_hour_obj)
+            # Znajdź CAŁY blok lekcji (wstecz + do przodu)
+            full_lesson_block = get_full_lesson_block(lesson)
+            
+            # Oblicz czasy dla całego bloku
+            total_remaining_time = calculate_block_remaining_time(full_lesson_block)
+            total_duration = calculate_block_total_duration(full_lesson_block)
+            time_elapsed = calculate_block_elapsed_time(full_lesson_block)
             
             # Przygotuj obiekt lekcji z informacjami o bloku
-            current_lesson = consecutive_lessons[0].copy()
+            current_lesson = full_lesson_block[0].copy()  # Używamy pierwszej lekcji z bloku
             current_lesson["remaining_time"] = total_remaining_time
-            current_lesson["total_duration"] = max(1, len(consecutive_lessons) * 45)
+            current_lesson["total_duration"] = total_duration
             current_lesson["time_elapsed"] = time_elapsed
-            current_lesson["consecutive_count"] = len(consecutive_lessons)
+            current_lesson["consecutive_count"] = len(full_lesson_block)
             current_lesson["break_duration"] = 0
             current_lesson["is_break"] = False
+            current_lesson["full_block"] = full_lesson_block
             
             return current_lesson
     
@@ -338,6 +418,40 @@ def get_current_lesson(settings=None):
         "is_break": True,
         "consecutive_count": 0
     }
+
+def get_real_next_lesson(current_hour_obj, current_syllabus, settings=None):
+    """Znajduje prawdziwą następną lekcję pomijając połączone lekcje"""
+    try:
+        response = fetch_timetable("https://planzajecpk.app/api/timetable/a")
+        if not response:
+            return {"syllabus": "Brak dalszych zajęć", "hall": "-"}
+        
+        current_hour_id = current_hour_obj.get('id') if current_hour_obj else None
+        
+        # Zacznij szukanie od następnej godziny po aktualnej
+        next_hour_obj = get_next_hour(current_hour_id)
+        
+        # Szukaj pierwszej lekcji która NIE ma tej samej nazwy co aktualna
+        while next_hour_obj:
+            for lesson in response:
+                if (lesson['day'] == datetime.now().weekday() + 1 and 
+                    lesson['hour'] == next_hour_obj['id'] and
+                    lesson.get('syllabus') != current_syllabus):
+                    
+                    # Sprawdź czy lekcja pasuje do filtrów
+                    if is_lesson_matching_filters(lesson, 
+                                                 settings.get("group_l") if settings else None,
+                                                 settings.get("group_k") if settings else None):
+                        return lesson
+            
+            # Przejdź do następnej godziny
+            next_hour_obj = get_next_hour(next_hour_obj['id'])
+        
+        return {"syllabus": "Koniec zajęć", "hall": "-"}
+        
+    except Exception as e:
+        print(f"Błąd podczas znajdowania następnych zajęć: {e}")
+        return {"syllabus": "Brak dalszych zajęć", "hall": "-"}
 
 def get_next_lesson(current_hour_obj, settings=None):
     """Pobiera informacje o następnej lekcji lub przerwie (zachowuje kompatybilność)"""
@@ -374,7 +488,7 @@ def get_next_lesson(current_hour_obj, settings=None):
                         continue
                     
                     # Znajdź wszystkie kolejne lekcji tworzące blok
-                    consecutive_lessons = get_consecutive_lessons(lesson)
+                    consecutive_lessons = get_full_lesson_block(lesson)
                     next_lesson = consecutive_lessons[0].copy()
                     next_lesson["total_duration"] = max(1, len(consecutive_lessons) * 45)
                     next_lesson["consecutive_count"] = len(consecutive_lessons)
@@ -443,7 +557,7 @@ def get_next_lesson(current_hour_obj, settings=None):
                     continue
                 
                 # Znajdź wszystkie kolejne lekcji tworzące blok
-                consecutive_lessons = get_consecutive_lessons(lesson)
+                consecutive_lessons = get_full_lesson_block(lesson)
                 next_lesson = consecutive_lessons[0].copy()
                 next_lesson["total_duration"] = max(1, len(consecutive_lessons) * 45)
                 next_lesson["consecutive_count"] = len(consecutive_lessons)
@@ -479,3 +593,6 @@ def get_next_lesson(current_hour_obj, settings=None):
         "is_break": False,
         "consecutive_count": 0
     }
+
+# Zachowaj kompatybilność - aliasy
+get_current_lesson = get_current_lesson_with_full_block

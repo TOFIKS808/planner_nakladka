@@ -1,11 +1,12 @@
-import requests
+from src.settings_window import SettingsWindow
 from src import api
-from PyQt6.QtWidgets import QWidget, QSlider, QPushButton, QLabel, QVBoxLayout, QCheckBox, QSpacerItem, QSizePolicy, QMessageBox, QApplication, QRadioButton, QButtonGroup, QHBoxLayout
+from PyQt6.QtWidgets import QWidget, QApplication, QMessageBox
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QFont, QMouseEvent, QCursor
 from PyQt6.QtCore import Qt, QRectF, pyqtProperty, QPropertyAnimation, QEasingCurve, QTimer
 from PyQt6.QtGui import QGuiApplication
 import keyboard
 import json, os
+from datetime import datetime
 
 class OverlayWidget(QWidget):
     def __init__(self, title, left_text, right_text, progress=0.0):
@@ -27,16 +28,21 @@ class OverlayWidget(QWidget):
         self.right_text = right_text
 
         # Styl
-        self.bg_color = QColor(31, 35, 43)
-        self.progress_color = QColor(46, 139, 87)
-        self.text_color = QColor(255, 255, 255)
+        self.bg_color = QColor(31, 35, 43, 255)
+        self.progress_color = QColor(46, 139, 87, 255)
+        self.text_color = QColor(255, 255, 255, 255)
         self.shadow_color = QColor(0, 0, 0, 100)
         self.radius = 15
 
+        # Zezwól na zmianę rozmiaru
+        self.setMinimumSize(200, 48)
+        self.setMaximumSize(800, 190)
+
         # Stan overlay
         self._progress = progress
-        self._settings_mode = False
-        self._clickthrough_enabled = True
+        self._clickthrough_enabled = True  # Domyślnie włączone
+        self.drag_enabled = True
+        self.scaling_enabled = False  # Domyślnie WYŁĄCZONE skalowanie
 
         # Rozmiar początkowy
         self.original_width = 420
@@ -48,6 +54,12 @@ class OverlayWidget(QWidget):
         self._drag_active = False
         self._drag_position = None
         self._was_clickthrough = False
+
+        # Resize
+        self._resize_active = False
+        self._resize_corner = None
+        self._resize_start_pos = None
+        self._resize_start_size = None
 
         # Okno
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -63,179 +75,41 @@ class OverlayWidget(QWidget):
         self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
         # Skrót klawiszowy
+        try:
+            keyboard.remove_hotkey("ctrl+q")
+        except Exception:
+            pass
         keyboard.add_hotkey("ctrl+q", self.toggle_overlay)
-
-        # === Panel ustawień ===
-        self.settings_panel = QWidget(self)
-        r, g, b, a = self.bg_color.getRgb()
-        self.settings_panel.setStyleSheet(
-            f"background-color: rgba({r}, {g}, {b}, 255); border-radius: {self.radius}px;"
-        )
-
-        layout = QVBoxLayout(self.settings_panel)
-        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        layout.setContentsMargins(30, 20, 30, 20)
-        layout.setSpacing(15)
-
-        header = QLabel("⚙️ Ustawienia nakładki")
-        header.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
-        header.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        layout.addWidget(header)
-
-        # Suwak przezroczystości
-        label = QLabel("Przezroczystość nakładki:")
-        label.setStyleSheet("color: white; font-size: 13px;")
-        layout.addWidget(label)
-        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
-        self.opacity_slider.setMinimum(30)
-        self.opacity_slider.setMaximum(100)
-        self.opacity_slider.setValue(100)
-        self.opacity_slider.valueChanged.connect(self.update_opacity)
-        self.opacity_slider.setStyleSheet(self._slider_style())
-        layout.addWidget(self.opacity_slider)
-
-        # Suwak skalowania
-        scale_label = QLabel("Skalowanie nakładki (40–100%):")
-        scale_label.setStyleSheet("color: white; font-size: 13px;")
-        layout.addWidget(scale_label)
-        self.scale_slider = QSlider(Qt.Orientation.Horizontal)
-        self.scale_slider.setMinimum(40)
-        self.scale_slider.setMaximum(100)
-        self.scale_slider.setValue(100)
-        self.scale_slider.valueChanged.connect(self.update_scale)
-        self.scale_slider.setStyleSheet(self._slider_style())
-        layout.addWidget(self.scale_slider)
-
-        # Checkbox click-through
-        self.clickthrough_checkbox = QCheckBox("Pozwól klikać przez nakładkę")
-        self.clickthrough_checkbox.setStyleSheet("""
-            QCheckBox { color: white; font-size: 13px; spacing: 8px; }
-            QCheckBox::indicator { width: 18px; height: 18px; border-radius: 4px; border: 2px solid #3CB371; background-color: transparent; }
-            QCheckBox::indicator:checked { background-color: #3CB371; border: 2px solid #2E8B57; }
-        """)
-        self.clickthrough_checkbox.stateChanged.connect(self.toggle_clickthrough_option)
-        layout.addWidget(self.clickthrough_checkbox)
-
-        # Checkbox dragging
-        self.drag_checkbox = QCheckBox("Pozwól przenosić nakładkę")
-        self.drag_checkbox.setStyleSheet("""
-            QCheckBox { color: white; font-size: 13px; spacing: 8px; }
-            QCheckBox::indicator { width: 18px; height: 18px; border-radius: 4px; border: 2px solid #3CB371; background-color: transparent; }
-            QCheckBox::indicator:checked { background-color: #3CB371; border: 2px solid #2E8B57; }
-        """)
-        layout.addWidget(self.drag_checkbox)
-
-        # Grupy zajęciowe
-        layout.addSpacerItem(QSpacerItem(10, 15, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
-        self.group_c = QButtonGroup(self)
-        rb_c = [
-            QRadioButton("11K1"),
-            QRadioButton("11K2")
-        ]
-        for w in range(0, len(rb_c), 3):
-            row = QHBoxLayout()
-            row.addStretch()
-            for i in rb_c[w:w + 3]:
-                row.addWidget(i)
-                self.group_c.addButton(i)
-                i.setStyleSheet("""
-                    QRadioButton { color: white; font-size: 13px; spacing: 8px; }
-                    QRadioButton::indicator { width: 18px; height: 18px;
-                    border-radius: 9px; border: 2px solid #3CB371; background-color: transparent; }
-                    QRadioButton::indicator:checked { background-color: #3CB371; border: 2px solid #2E8B57; }
-                """)
-            row.addStretch()
-            layout.addLayout(row)
-
-        layout.addSpacerItem(QSpacerItem(10, 15, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
-        self.group_l = QButtonGroup(self)
-        rb_l = [
-            QRadioButton("L01"),
-            QRadioButton("L02"),
-            QRadioButton("L03"),
-            QRadioButton("L04"),
-            QRadioButton("L05")
-        ]
-        for w in range(0, len(rb_l), 3):
-            row = QHBoxLayout()
-            row.addStretch()
-            for i in rb_l[w:w + 3]:
-                row.addWidget(i)
-                self.group_l.addButton(i)
-                i.setStyleSheet("""
-                    QRadioButton { color: white; font-size: 13px; spacing: 8px; }
-                    QRadioButton::indicator { width: 18px; height: 18px;
-                    border-radius: 9px; border: 2px solid #3CB371; background-color: transparent; }
-                    QRadioButton::indicator:checked { background-color: #3CB371; border: 2px solid #2E8B57; }
-                """)
-            row.addStretch()
-            layout.addLayout(row)
-
-        layout.addSpacerItem(QSpacerItem(10, 15, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
-        self.group_k = QButtonGroup(self)
-        rb_k = [
-            QRadioButton("K01"),
-            QRadioButton("K02"),
-            QRadioButton("K03"),
-            QRadioButton("K04")
-        ]
-
-        for w in range(0, len(rb_k), 2):
-            row = QHBoxLayout()
-            row.addStretch()
-            for i in rb_k[w:w + 3]:
-                row.addWidget(i)
-                self.group_k.addButton(i)
-                i.setStyleSheet("""
-                    QRadioButton { color: white; font-size: 13px; spacing: 8px; }
-                    QRadioButton::indicator { width: 18px; height: 18px;
-                    border-radius: 9px; border: 2px solid #3CB371; background-color: transparent; }
-                    QRadioButton::indicator:checked { background-color: #3CB371; border: 2px solid #2E8B57; }
-                """)
-            row.addStretch()
-            layout.addLayout(row)
-        
-        # Przycisk powrotu
-        layout.addSpacerItem(QSpacerItem(10, 15, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
-
-        self.back_button = QPushButton("← Powrót")
-        self.back_button.clicked.connect(self.toggle_settings)
-        self.back_button.setStyleSheet("""
-            QPushButton { background-color: #2E8B57; color: white; border: none; padding: 8px 12px; border-radius: 10px; font-size: 13px; }
-            QPushButton:hover { background-color: #3CB371; }
-        """)
-        layout.addWidget(self.back_button, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        # Przyciski zamknięcia
-        self.close_button = QPushButton("❌ Zamknij program")
-        self.close_button.clicked.connect(self.confirm_close)
-        self.close_button.setStyleSheet("""
-            QPushButton { background-color: #8B0000; color: white; border: none; padding: 8px 12px; border-radius: 10px; font-size: 13px; }
-            QPushButton:hover { background-color: #B22222; }
-        """)
-        layout.addWidget(self.close_button, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        self.settings_panel.hide()
 
         # Timer kursora
         self.cursor_timer = QTimer(self)
         self.cursor_timer.timeout.connect(self.check_cursor_position)
         self.cursor_timer.start(200)
+        
+        # Śledzenie poprzedniej pozycji kursora
+        self._last_cursor_over_gear = False
+        self._last_cursor_over_resize = False
 
-        # Wczytaj ustawienia
+        # Cache ustawień w pamięci
+        self._settings_cache = {}
+        
+        # Wczytaj ustawienia do cache
         self.load_settings()
 
-    # ===== Styl slidera =====
-    def _slider_style(self):
-        return """
-        QSlider::groove:horizontal { height: 8px; background: #2E8B57; border-radius: 4px; }
-        QSlider::handle:horizontal { background: #2E8B57; border: 2px solid white; width: 16px; height: 16px; margin: -4px 0; border-radius: 8px; }
-        QSlider::sub-page:horizontal { background: #2E8B57; border-radius: 4px; }
-        QSlider::add-page:horizontal { background: #555; border-radius: 4px; }
-        """
+        # Okno ustawień
+        self.settings_window = SettingsWindow(self)
+        self.settings_window.hide()
+
+        # Referencja do tray
+        self.tray = None
+
+        # Timer dla aktualizacji
+        self.update_timer = QTimer(self)
+        self.update_timer.timeout.connect(self.minute_update)
 
     # ===== Clickthrough =====
     def enable_clickthrough(self):
+        """Włącza clickthrough - okno staje się przezroczyste dla myszy"""
         self._clickthrough_enabled = True
         if self.isVisible():
             self.setWindowFlags(
@@ -245,8 +119,14 @@ class OverlayWidget(QWidget):
                 | Qt.WindowType.WindowTransparentForInput
             )
             self.show()
+        
+        # Aktualizuj UI
+        self.update_ui_states()
+        self.save_settings()
 
     def disable_clickthrough(self):
+        """Wyłącza clickthrough - okno reaguje na mysz"""
+        print("Disabling clickthrough")
         self._clickthrough_enabled = False
         if self.isVisible():
             self.setWindowFlags(
@@ -255,50 +135,114 @@ class OverlayWidget(QWidget):
                 | Qt.WindowType.Tool
             )
             self.show()
+        
+        # Aktualizuj UI
+        self.update_ui_states()
+        self.save_settings()
 
     def toggle_clickthrough_option(self, state):
-        if self._settings_mode:
-            return
+        """Przełączanie clickthrough z aktualizacją UI"""
         if state == Qt.CheckState.Checked.value:
             self.enable_clickthrough()
         else:
             self.disable_clickthrough()
+        self.update_ui_states()
+
+    def apply_clickthrough_state(self):
+        """Stosuje aktualny stan clickthrough bez zmiany flagi"""
+        if self._clickthrough_enabled:
+            if self.isVisible():
+                self.setWindowFlags(
+                    Qt.WindowType.FramelessWindowHint
+                    | Qt.WindowType.WindowStaysOnTopHint
+                    | Qt.WindowType.Tool
+                    | Qt.WindowType.WindowTransparentForInput
+                )
+                self.show()
+        else:
+            if self.isVisible():
+                self.setWindowFlags(
+                    Qt.WindowType.FramelessWindowHint
+                    | Qt.WindowType.WindowStaysOnTopHint
+                    | Qt.WindowType.Tool
+                )
+                self.show()
+
+    # ===== Drag =====
+    def set_drag_enabled(self, enabled):
+        """Ustawia stan drag i aktualizuje UI"""
+        self.drag_enabled = enabled
+        self.update_ui_states()
         self.save_settings()
 
+    def toggle_drag_option(self, state):
+        """Przełączanie drag z aktualizacją UI"""
+        self.drag_enabled = (state == Qt.CheckState.Checked.value)
+        self.update_ui_states()
+        self.save_settings()
+
+    # ===== Scaling =====
+    def set_scaling_enabled(self, enabled):
+        """Ustawia stan scaling i aktualizuje UI"""
+        self.scaling_enabled = enabled
+        self.update_ui_states()
+        self.save_settings()
+        self.update()  # Odśwież aby pokazać/ukryć uchwyt resize
+
+    def toggle_scaling_option(self, state):
+        """Przełączanie scaling z aktualizacją UI"""
+        self.scaling_enabled = (state == Qt.CheckState.Checked.value)
+        self.update_ui_states()
+        self.save_settings()
+        self.update()  # Odśwież aby pokazać/ukryć uchwyt resize
+
     def check_cursor_position(self):
-        if self._settings_mode:
-            return
         global_pos = QCursor.pos()
         local_pos = self.mapFromGlobal(global_pos)
-        if hasattr(self, "gear_rect") and self.gear_rect.contains(local_pos.toPointF()):
-            self.disable_clickthrough()
-        else:
-            if self.clickthrough_checkbox.isChecked():
-                self.enable_clickthrough()
-            else:
+        
+        current_over_gear = hasattr(self, "gear_rect") and self.gear_rect.contains(local_pos.toPointF())
+        current_over_resize = (self.scaling_enabled and hasattr(self, "resize_handle_rect") 
+                              and self.resize_handle_rect is not None
+                              and self.resize_handle_rect.contains(local_pos.toPointF()))
+        
+        # Sprawdź zmiany stanu
+        gear_just_left = self._last_cursor_over_gear and not current_over_gear
+        resize_just_left = self._last_cursor_over_resize and not current_over_resize
+        gear_just_entered = not self._last_cursor_over_gear and current_over_gear
+        resize_just_entered = not self._last_cursor_over_resize and current_over_resize
+        
+        # Aktualizuj poprzedni stan
+        self._last_cursor_over_gear = current_over_gear
+        self._last_cursor_over_resize = current_over_resize
+        
+        # Ustaw kursor
+        if current_over_gear:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            if self._clickthrough_enabled:
                 self.disable_clickthrough()
+        elif current_over_resize:
+            self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+            if self._clickthrough_enabled:
+                self.disable_clickthrough()
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            # PRZYWRÓĆ CLICKTHROUGH GDY KURSOR OPUSZCZA OBSZAR INTERAKTYWNY
+            if (gear_just_left or resize_just_left) and self._clickthrough_enabled:
+                self.enable_clickthrough()
 
     # ===== Panel ustawień =====
     def toggle_settings(self):
-        self._settings_mode = not self._settings_mode
-        if self._settings_mode:
-            self.disable_clickthrough()
-            self.settings_panel.adjustSize()
-            new_height = self.settings_panel.sizeHint().height() + 20
-            self.setFixedHeight(new_height)
-            self.setFixedWidth(self.settings_panel.sizeHint().width())
-            self.settings_panel.move(0, 0)
-            self.settings_panel.show()
-        else:
-            self.settings_panel.hide()
-            self.setFixedHeight(int(self.original_height * self.scale_factor))
-            self.setFixedWidth(int(self.original_width * self.scale_factor))
-            if self.clickthrough_checkbox.isChecked():
-                self.enable_clickthrough()
+        if hasattr(self, "settings_window"):
+            if self.settings_window.isVisible():
+                self.settings_window.hide()
+                # Przywróć clickthrough po zamknięciu ustawień
+                if self._clickthrough_enabled:
+                    self.apply_clickthrough_state()
             else:
+                self.settings_window.show()
+                self.settings_window.raise_()
+                # Wyłącz clickthrough gdy ustawienia są otwarte
                 self.disable_clickthrough()
-        self.save_settings()
-        self.update()
 
     # ===== Toggle widoczności =====
     def toggle_overlay(self):
@@ -306,23 +250,14 @@ class OverlayWidget(QWidget):
             self.hide()
         else:
             self.show()
-            if self.clickthrough_checkbox.isChecked():
-                self.enable_clickthrough()
-            else:
-                self.disable_clickthrough()
+            # Zastosuj aktualny stan clickthrough
+            self.apply_clickthrough_state()
 
     # ===== Opacity / Scale / Progress =====
     def update_opacity(self, value):
-        self.setWindowOpacity(value / 100.0)
-        self.save_settings()
-
-    def update_scale(self, value):
-        self.scale_factor = value / 100.0
-        self.resize(int(self.original_width * self.scale_factor), int(self.original_height * self.scale_factor))
-        self.radius = int(15 * self.scale_factor)
-        if self._settings_mode:
-            self.settings_panel.adjustSize()
-        self.update()
+        """Zmiana przezroczystości"""
+        opacity = max(0.3, min(value / 100.0, 1.0))
+        self.setWindowOpacity(opacity)
         self.save_settings()
 
     def getProgress(self):
@@ -342,8 +277,6 @@ class OverlayWidget(QWidget):
 
     # ===== Malowanie =====
     def paintEvent(self, event):
-        if self._settings_mode:
-            return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect = self.rect()
@@ -403,6 +336,29 @@ class OverlayWidget(QWidget):
         painter.setFont(QFont("Segoe UI Symbol", int(16 * self.scale_factor)))
         painter.drawText(self.gear_rect, Qt.AlignmentFlag.AlignCenter, "⚙️")
 
+        # --- Uchwyt do resize w prawym dolnym rogu (TYLKO jeśli skalowanie włączone) ---
+        if self.scaling_enabled:
+            handle_size = int(12 * self.scale_factor)
+            self.resize_handle_rect = QRectF(
+                rect.width() - handle_size - 2,
+                rect.height() - handle_size - 2,
+                handle_size,
+                handle_size
+            )
+            
+            painter.setBrush(QColor(100, 100, 100, 150))
+            painter.setPen(Qt.PenStyle.NoPen)
+            
+            handle_path = QPainterPath()
+            handle_path.moveTo(self.resize_handle_rect.right(), self.resize_handle_rect.bottom())
+            handle_path.lineTo(self.resize_handle_rect.right(), self.resize_handle_rect.top())
+            handle_path.lineTo(self.resize_handle_rect.left(), self.resize_handle_rect.bottom())
+            handle_path.closeSubpath()
+            
+            painter.drawPath(handle_path)
+        else:
+            self.resize_handle_rect = None
+
     # ===== Drag & Drop =====
     def mousePressEvent(self, event: QMouseEvent):
         if hasattr(self, "gear_rect") and self.gear_rect.contains(event.position()):
@@ -410,105 +366,327 @@ class OverlayWidget(QWidget):
             event.accept()
             return
 
-        if self.drag_checkbox.isChecked() and event.button() == Qt.MouseButton.LeftButton:
-            self._drag_active = True
-            self._drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            self._was_clickthrough = self.clickthrough_checkbox.isChecked()
+        # Sprawdź czy kliknięto w uchwyt resize (TYLKO jeśli skalowanie włączone i rect istnieje)
+        if (self.scaling_enabled and hasattr(self, "resize_handle_rect")
+            and self.resize_handle_rect is not None
+            and self.resize_handle_rect.contains(event.position())):
+            self._resize_active = True
+            self._resize_corner = "bottom_right"
+            self._resize_start_pos = event.globalPosition().toPoint()
+            self._resize_start_size = self.size()
+            self._was_clickthrough = self._clickthrough_enabled
             self.disable_clickthrough()
             event.accept()
+            return
 
+        # TYLKO JEŚLI DRAG JEST WŁĄCZONY
+        if self.drag_enabled and event.button() == Qt.MouseButton.LeftButton:
+            self._drag_active = True
+            self._drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self._was_clickthrough = self._clickthrough_enabled
+            self.disable_clickthrough()
+            event.accept()
+            return
+        
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
-        if self._drag_active and event.buttons() & Qt.MouseButton.LeftButton:
+        # Obsługa resize (TYLKO jeśli skalowanie włączone)
+        if self._resize_active and self.scaling_enabled:
+            delta = event.globalPosition().toPoint() - self._resize_start_pos
+            
+            if self._resize_corner == "bottom_right":
+                new_width = max(self.minimumWidth(), self._resize_start_size.width() + delta.x())
+                # Zachowaj proporcje 420:100 = 4.2:1
+                new_height = int(new_width / 4.2)
+                new_height = max(self.minimumHeight(), min(new_height, self.maximumHeight()))
+                
+                # Jeśli wysokość osiągnęła limit, dostosuj szerokość
+                if new_height == self.maximumHeight():
+                    new_width = int(new_height * 4.2)
+                elif new_height == self.minimumHeight():
+                    new_width = int(new_height * 4.2)
+            
+            self.resize(new_width, new_height)
+            self.scale_factor = new_width / self.original_width
+            self.radius = int(15 * self.scale_factor)
+            
+            event.accept()
+            return
+            
+        # TYLKO JEŚLI DRAG JEST WŁĄCZONY
+        if self._drag_active and self.drag_enabled and event.buttons() & Qt.MouseButton.LeftButton:
             self.move(event.globalPosition().toPoint() - self._drag_position)
             event.accept()
+            return
+            
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
+        if self._resize_active and event.button() == Qt.MouseButton.LeftButton:
+            self._resize_active = False
+            self._resize_corner = None
+            self._resize_start_pos = None
+            self._resize_start_size = None
+            
+            if self._was_clickthrough:
+                self.enable_clickthrough()
+                
+            self.save_settings()
+            event.accept()
+            return
+            
         if self._drag_active and event.button() == Qt.MouseButton.LeftButton:
             self._drag_active = False
             self._drag_position = None
-
-            if self.clickthrough_checkbox.isChecked():
+            if self._was_clickthrough:
                 self.enable_clickthrough()
-            else:
-                self.disable_clickthrough()
-
             self.save_settings()
             event.accept()
+            return
+            
         super().mouseReleaseEvent(event)
 
     # ===== Zapis / Odczyt =====
     def load_settings(self):
+        """Wczytaj ustawienia do cache"""
         try:
             if not os.path.exists(self.config_path):
+                self._settings_cache = {
+                    "opacity": 1.0,
+                    "clickthrough": True,
+                    "drag_enabled": True,
+                    "scaling_enabled": False,
+                    "group_c": None,
+                    "group_l": None,
+                    "group_k": None,
+                    "scale": 1.0,
+                    "position": [100, 100],
+                    "width": 420,
+                    "height": 100
+                }
+                # Zastosuj domyślne ustawienia
+                self.apply_settings_from_cache()
                 return
+                    
             with open(self.config_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            opacity = data.get("opacity", 1.0)
-            scale = data.get("scale", 1.0)
-            clickthrough = data.get("clickthrough", True)
-            drag_enabled = data.get("drag_enabled", False)
-            pos = data.get("position", None)
+                loaded_data = json.load(f)
+                
+            # UPEWNIJ SIĘ ŻE WSZYSTKIE KLUCZE SĄ OBECNE
+            default_settings = {
+                "opacity": 1.0,
+                "clickthrough": True,
+                "drag_enabled": True,
+                "scaling_enabled": False,
+                "group_c": None,
+                "group_l": None,
+                "group_k": None,
+                "scale": 1.0,
+                "position": [100, 100],
+                "width": 420,
+                "height": 100
+            }
             
-            # Ustawienia
-            self.setWindowOpacity(opacity)
-            self.scale_factor = scale
-
-            if hasattr(self, "opacity_slider"):
-                self.opacity_slider.blockSignals(True)
-                self.opacity_slider.setValue(int(opacity * 100))
-                self.opacity_slider.blockSignals(False)
-
-            if hasattr(self, "scale_slider"):
-                self.scale_slider.blockSignals(True)
-                self.scale_slider.setValue(int(scale * 100))
-                self.scale_slider.blockSignals(False)
-                self.update_scale(int(scale * 100))
-
-            if hasattr(self, "clickthrough_checkbox"):
-                self.clickthrough_checkbox.blockSignals(True)
-                self.clickthrough_checkbox.setChecked(clickthrough)
-                self.clickthrough_checkbox.blockSignals(False)
-                if clickthrough:
-                    self.enable_clickthrough()
-                else:
-                    self.disable_clickthrough()
-
-            if hasattr(self, "drag_checkbox"):
-                self.drag_checkbox.blockSignals(True)
-                self.drag_checkbox.setChecked(drag_enabled)
-                self.drag_checkbox.blockSignals(False)
-
-            if pos:
-                self.move(pos[0], pos[1])
-
-            # Grupy radiobutton
-            self.set_checked_label(self.group_c, data.get("group_c"))
-            self.set_checked_label(self.group_l, data.get("group_l"))
-            self.set_checked_label(self.group_k, data.get("group_k"))
-
+            # Połącz załadowane dane z domyślnymi
+            self._settings_cache = {**default_settings, **loaded_data}
+            
+            # Zastosuj ustawienia z cache
+            self.apply_settings_from_cache()
+                                    
         except Exception as e:
             print("Błąd podczas wczytywania ustawień:", e)
+            self._settings_cache = {
+                "opacity": 1.0,
+                "clickthrough": True,
+                "drag_enabled": True,
+                "scaling_enabled": False,
+                "group_c": None,
+                "group_l": None,
+                "group_k": None,
+                "scale": 1.0,
+                "position": [100, 100],
+                "width": 420,
+                "height": 100
+            }
+            self.apply_settings_from_cache()
+
+    def apply_settings_from_cache(self):
+        """Stosuje ustawienia z cache bez wywoływania metod zmieniających flagi"""
+        # Wczytaj rozmiar i pozycję
+        saved_width = self._settings_cache.get("width", self.original_width)
+        saved_height = self._settings_cache.get("height", self.original_height)
+        
+        self.resize(saved_width, saved_height)
+        self.scale_factor = saved_width / self.original_width
+        
+        # Wczytaj ustawienia z cache BEZ wywoływania metod enable/disable
+        self.drag_enabled = self._settings_cache.get("drag_enabled", True)
+        self.scaling_enabled = self._settings_cache.get("scaling_enabled", False)
+        self.setWindowOpacity(self._settings_cache.get("opacity", 1.0))
+        
+        # Ustaw flagę clickthrough bez wywoływania metod
+        self._clickthrough_enabled = self._settings_cache.get("clickthrough", True)
+        
+        # Zastosuj stan clickthrough
+        self.apply_clickthrough_state()
+        
+        # Wczytaj pozycję
+        pos = self._settings_cache.get("position")
+        if pos and len(pos) == 2:
+            self.move(pos[0], pos[1])
 
     def save_settings(self):
-        data = {
-            "opacity": self.windowOpacity(),
-            "scale": self.scale_factor,
-            "clickthrough": self.clickthrough_checkbox.isChecked(),
-            "drag_enabled": self.drag_checkbox.isChecked(),
-            "position": [self.x(), self.y()],
-            "group_c": self.get_checked_label(self.group_c),
-            "group_l": self.get_checked_label(self.group_l),
-            "group_k": self.get_checked_label(self.group_k)
-        }
+        """Zapisz ustawienia z cache"""
         try:
+            # Aktualizuj cache przed zapisem
+            self._settings_cache.update({
+                "opacity": round(self.windowOpacity(), 2),
+                "scale": round(self.width() / self.original_width, 2),
+                "clickthrough": self._clickthrough_enabled,
+                "drag_enabled": self.drag_enabled,
+                "scaling_enabled": self.scaling_enabled,
+                "position": [self.x(), self.y()],
+                "width": self.width(),
+                "height": self.height()
+            })
+            
             with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=4)
+                json.dump(self._settings_cache, f, indent=4)
+                            
         except Exception as e:
             print("Błąd zapisu ustawień:", e)
+
+    def get_current_settings(self):
+        """Zwraca aktualne ustawienia z cache"""
+        return self._settings_cache.copy()
+
+    def update_settings(self, new_settings):
+        """Aktualizuje ustawienia w cache i zapisuje do pliku - TYLKO przekazane wartości"""
+        try:            
+            # AKTUALIZUJ TYLKO PRZEKAZANE KLUCZE - nie usuwaj istniejących
+            for key, value in new_settings.items():
+                # ZAPISZ WARTOŚĆ NAWET JEŚLI JEST None - to oznacza "brak wybranej grupy"
+                self._settings_cache[key] = value            
+            # Zapisz do pliku
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(self._settings_cache, f, indent=4)
+                            
+        except Exception as e:
+            print("Błąd aktualizacji ustawień:", e)
+
+    # ===== Aktualizacja UI =====
+    def update_ui_states(self):
+        """Aktualizuje UI w settings i tray dla wszystkich stanów"""
+        # Aktualizuj settings window
+        if hasattr(self, 'settings_window') and self.settings_window:
+            self.settings_window.clickthrough_checkbox.setChecked(self._clickthrough_enabled)
+            self.settings_window.drag_checkbox.setChecked(self.drag_enabled)
+            self.settings_window.scaling_checkbox.setChecked(self.scaling_enabled)
+        
+        # Aktualizuj tray
+        if hasattr(self, 'tray') and self.tray:
+            self.tray.update_all_states()
+
+    # ===== API =====
+    def start_minute_updates(self):
+        """Rozpoczyna okresowe aktualizacje co minutę"""
+        self.update_timer.start(20 * 1000)  # 20 sekund
+        # Od razu wykonaj pierwszą aktualizację
+        self.minute_update()
+
+    def minute_update(self):
+        # UŻYJ USTAWIEN Z CACHE zamiast wczytywać z pliku        
+        current_hour_obj = api.get_current_hour()
+        
+        # PRZEKAŻ USTAWIENIA Z CACHE DO FUNKCJI API
+        currentLesson = api.get_current_lesson(self._settings_cache) or {
+            "syllabus": "Brak zajęć", 
+            "remaining_time": 0, 
+            "total_duration": 45, 
+            "is_break": False, 
+            "time_elapsed": 0
+        }
+        
+        # Pobierz następną lekcję
+        nextLesson = api.get_next_lesson(current_hour_obj, self._settings_cache) or {
+            "syllabus": "Brak dalszych zajęć", 
+            "hall": "-"
+        }
+
+        # SPRAWDŹ CZY NASTĘPNA LEKCJA MA TĘ SAMĄ NAZWĘ CO AKTUALNA
+        current_syllabus = currentLesson.get("syllabus", "")
+        next_syllabus = nextLesson.get("syllabus", "")
+        
+        # Jeśli następna lekcja ma tę samą nazwę, znajdź prawdziwą następną lekcję
+        if (current_syllabus == next_syllabus and 
+            current_syllabus not in ["Brak zajęć", "Przerwa", "Brak dalszych zajęć", "Koniec zajęć"]):
+            nextLesson = self.find_real_next_lesson(current_hour_obj, current_syllabus) or {
+                "syllabus": "Brak dalszych zajęć", 
+                "hall": "-"
+            }
+
+        self.title = currentLesson.get("syllabus", "Brak zajęć")
+        remaining_time = currentLesson.get("remaining_time", 0)
+        total_duration = currentLesson.get("total_duration", 45)
+
+        self.left_text = f"{round(remaining_time)}min → {nextLesson.get('syllabus', '-')}"
+        self.right_text = nextLesson.get("hall", "-")
+
+        # POPRAWIONE OBLICZANIE PROGRESU - UWZGLĘDNIA PRZERWY
+        is_break = currentLesson.get("is_break", False)
+        time_elapsed = currentLesson.get("time_elapsed", 0)
+        
+        if is_break:
+            # Dla przerwy: progres = czas który minął / całkowity czas przerwy
+            if total_duration > 0:
+                progress = time_elapsed / total_duration
+            else:
+                progress = 0.0
+        else:
+            # Dla lekcji: progres = 1 - (pozostały czas / całkowity czas)
+            if total_duration > 0:
+                progress = 1.0 - (float(remaining_time) / float(total_duration))
+            else:
+                progress = 0.0
+        
+        progress = max(0.0, min(1.0, progress))
+        
+        self.animateProgressTo(progress)
+        self.update()
+
+    def find_real_next_lesson(self, current_hour_obj, current_syllabus):
+        """Znajduje prawdziwą następną lekcję pomijając połączone lekcje o tej samej nazwie"""
+        try:
+            response = api.fetch_timetable("https://planzajecpk.app/api/timetable/a")
+            if not response:
+                return {"syllabus": "Brak dalszych zajęć", "hall": "-"}
+            
+            current_hour_id = current_hour_obj.get('id') if current_hour_obj else None
+            
+            # Zacznij szukanie od następnej godziny po aktualnej
+            next_hour_obj = api.get_next_hour(current_hour_id)
+            
+            # Szukaj pierwszej lekcji która NIE ma tej samej nazwy co aktualna
+            while next_hour_obj:
+                for lesson in response:
+                    if (lesson['day'] == datetime.now().weekday() + 1 and 
+                        lesson['hour'] == next_hour_obj['id'] and
+                        lesson.get('syllabus') != current_syllabus):
+                        
+                        # Sprawdź czy lekcja pasuje do filtrów
+                        if api.is_lesson_matching_filters(lesson, 
+                                                        self._settings_cache.get("group_l"),
+                                                        self._settings_cache.get("group_k")):
+                            return lesson
+                
+                # Przejdź do następnej godziny
+                next_hour_obj = api.get_next_hour(next_hour_obj['id'])
+            
+            return {"syllabus": "Koniec zajęć", "hall": "-"}
+            
+        except Exception as e:
+            print(f"Błąd podczas znajdowania następnych zajęć: {e}")
+            return {"syllabus": "Brak dalszych zajęć", "hall": "-"}
 
     # ===== Zamknięcie programu =====
     def confirm_close(self):
@@ -527,74 +705,3 @@ class OverlayWidget(QWidget):
                 self.update_timer.stop()
             keyboard.unhook_all_hotkeys()
             QApplication.quit()
-
-    # ===== API =====
-    def start_minute_updates(self):
-        self.update_timer = QTimer(self)
-        self.update_timer.timeout.connect(self.minute_update)
-        self.update_timer.start(20 * 1000)
-        self.minute_update()
-
-    def minute_update(self):
-        currentLesson = api.get_current_lesson() or {"syllabus": "Brak zajęć", "remaining_time": 0, "lessonType": "", "classGroup": "", "hallGroup": ""}
-        nextLesson = api.get_next_lesson() or {"syllabus": "Brak dalszych zajęć", "hall": "-", "lessonType": "", "classGroup": "", "hallGroup": ""}
-
-        # Pobieramy zaznaczone typy L/C/K
-        selected_l = self.get_checked_label(self.group_l)
-        selected_c = self.get_checked_label(self.group_c)
-        selected_k = self.get_checked_label(self.group_k)
-
-        # Funkcja sprawdzająca czy lekcja jest do wyświetlenia
-        def lesson_allowed(lesson):
-            if not lesson:
-                return False
-            return (lesson.get("lessonType", "") in [selected_l, ""]) or \
-                (lesson.get("classGroup", "") in [selected_c, ""]) or \
-                (lesson.get("hallGroup", "") in [selected_k, ""])
-
-        if not lesson_allowed(currentLesson):
-            self.title = ""
-            self.left_text = ""
-            self.right_text = ""
-            self.animateProgressTo(0.0)
-            self.update()
-            return
-
-        self.title = currentLesson.get("syllabus", "Brak zajęć")
-        remaining_time = currentLesson.get("remaining_time", 0)
-
-        # Kolejna lekcja tylko jeśli spełnia kryteria
-        if lesson_allowed(nextLesson):
-            next_syllabus = nextLesson.get("syllabus", "Brak dalszych zajęć")
-            next_hall = nextLesson.get("hall", "-")
-        else:
-            next_syllabus = "Przerwa"
-            next_hall = "-"
-
-        self.left_text = f"{round(remaining_time)}min → {next_syllabus}"
-        self.right_text = next_hall
-        progress = float((45 - float(remaining_time))) / 45.0
-        self.animateProgressTo(progress)
-        self.update()
-
-
-    # ===== Reposition =====
-    def reposition(self, margin_x=30, margin_y=30):
-        screen = QGuiApplication.screenAt(self.pos()) or QGuiApplication.primaryScreen()
-        screen_geo = screen.availableGeometry()
-        new_x = screen_geo.width() - self.width() - margin_x
-        new_y = margin_y
-        self.move(new_x, new_y)
-        self.save_settings()  # zapis pozycji od razu
-
-    def get_checked_label(self, button_group):
-        checked = button_group.checkedButton()
-        return checked.text() if checked else None
-
-    def set_checked_label(self, button_group, label):
-        if not label:
-            return
-        for btn in button_group.buttons():
-            if btn.text() == label:
-                btn.setChecked(True)
-                break

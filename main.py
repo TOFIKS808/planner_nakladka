@@ -1,28 +1,34 @@
 from src import overlay
-from PyQt6.QtWidgets import QApplication, QWidget
+from src.tray import Tray
+
+from PyQt6.QtWidgets import QApplication
 import sys
 
-
-
-# ======== URUCHOMIENIE ========
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
-    overlay = overlay.OverlayWidget(
-        title="Programowanie Proceduralne",
-        left_text="30min →",
-        right_text="Lab. Komputerowe",
+    overlay_widget = overlay.OverlayWidget(
+        title="Lekcja",
+        left_text="czas \u2192 następna",
+        right_text="sala",
         progress=0.0
     )
 
-    # pozycja w prawym górnym rogu
-    screen = app.primaryScreen()
-    geo = screen.availableGeometry()
-    overlay.show()
+    overlay_widget.show()
 
-    # 🔄 animacja paska
-    overlay.animateProgressTo(0.25)
+    # Najpierw tray, POTEM aktualizacje
+    tray = Tray(app, overlay_widget)
+    overlay_widget.tray_reference = tray
 
-    overlay.start_minute_updates()
+    # Uruchom aktualizacje (upewnij się, że te metody istnieją!)
+    if hasattr(overlay_widget, "start_minute_updates"):
+        overlay_widget.start_minute_updates()
+    else:
+        print("Brak metody start_minute_updates w OverlayWidget")
+
+    if hasattr(overlay_widget, "animateProgressTo"):
+        overlay_widget.animateProgressTo(0.25)
+    else:
+        print("Brak metody animateProgressTo w OverlayWidget")
 
     sys.exit(app.exec())

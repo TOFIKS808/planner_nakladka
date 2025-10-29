@@ -1,6 +1,8 @@
 from PyQt6.QtWidgets import QSystemTrayIcon, QMenu
 from PyQt6.QtGui import QIcon, QAction
 from PyQt6.QtCore import Qt
+import sys
+import os
 
 
 class Tray:
@@ -13,8 +15,17 @@ class Tray:
         self.app = app
         self.overlay = overlay
 
+        # Uzyskaj poprawną ścieżkę do zasobów (działa też po spakowaniu .exe)
+        def resource_path(relative_path):
+            """Zwraca poprawną ścieżkę do pliku zarówno w .exe, jak i w dev."""
+            if hasattr(sys, '_MEIPASS'):
+                return os.path.join(sys._MEIPASS, relative_path)
+            return os.path.join(os.path.abspath("."), relative_path)
+
+        icon_path = resource_path("images/ikona.ico")
+
         # Tworzymy ikonę tray
-        self.tray_icon = QSystemTrayIcon(QIcon("images/ikona.ico"), self.app)
+        self.tray_icon = QSystemTrayIcon(QIcon(icon_path), self.app)
         self.tray_icon.setToolTip("Overlay")
 
         # Budujemy menu

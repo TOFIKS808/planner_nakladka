@@ -4,7 +4,75 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QSlider, QCheckBox, QPushButton,
     QSpacerItem, QSizePolicy, QHBoxLayout, QButtonGroup, QRadioButton, QMessageBox
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, pyqtProperty
+from PyQt6.QtGui import QPainter, QLinearGradient, QColor
+
+
+class FancyCloseButton(QPushButton):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(30, 30)
+        self.setText("×")
+        self._opacity = 1.0
+        
+        # Animacja
+        self.animation = QPropertyAnimation(self, b"opacity")
+        self.animation.setDuration(200)
+        self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        
+    def get_opacity(self):
+        return self._opacity
+        
+    def set_opacity(self, value):
+        self._opacity = value
+        self.update()
+        
+    opacity = pyqtProperty(float, get_opacity, set_opacity)
+    
+    def enterEvent(self, event):
+        self.animation.setStartValue(self._opacity)
+        self.animation.setEndValue(0.8)
+        self.animation.start()
+        super().enterEvent(event)
+        
+    def leaveEvent(self, event):
+        self.animation.setStartValue(self._opacity)
+        self.animation.setEndValue(1.0)
+        self.animation.start()
+        super().leaveEvent(event)
+        
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Tło z gradientem przy najechaniu
+        if self.underMouse():
+            gradient = QLinearGradient(0, 0, 0, self.height())
+            gradient.setColorAt(0.0, QColor(220, 53, 69))
+            gradient.setColorAt(1.0, QColor(180, 35, 51))
+            painter.setBrush(gradient)
+        else:
+            painter.setBrush(QColor(0, 0, 0, 0))
+            
+        painter.setPen(Qt.PenStyle.NoPen)
+        
+        # Zaokrąglony prostokąt
+        rect = self.rect()
+        painter.drawRoundedRect(rect, 8, 8)
+        
+        # Efekt przezroczystości
+        painter.setOpacity(self._opacity)
+        
+        # Tekst (X) - perfekcyjnie wyśrodkowany
+        painter.setPen(QColor(255, 255, 255))
+        font = self.font()
+        font.setPointSize(16)
+        font.setBold(True)
+        painter.setFont(font)
+        
+        # Ręczne wyśrodkowanie tekstu
+        text_rect = rect.adjusted(0, -3, 0, 0)  # Korekta manualna
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, self.text())
 
 
 class SettingsWindow(QWidget):
@@ -14,8 +82,9 @@ class SettingsWindow(QWidget):
         self.setWindowTitle("⚙️ Ustawienia nakładki")
         self.setFixedWidth(420)
         
-        self.setWindowFlags(Qt.WindowType.Window)
-
+        # Usuwamy domyślny pasek tytułu i tworzymy własny
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
+        
         # Ścieżka ustawień
         if os.name == "nt":
             base_dir = os.getenv("APPDATA")
@@ -27,17 +96,64 @@ class SettingsWindow(QWidget):
         os.makedirs(self.config_dir, exist_ok=True)
         self.config_path = os.path.join(self.config_dir, "settings.json")
 
-        # === Layout ===
-        layout = QVBoxLayout(self)
+        # === Główny layout ===
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # ====== WŁASNY PASEK TYTUŁU ======
+        title_bar = QWidget()
+        title_bar.setFixedHeight(40)
+        title_bar.setStyleSheet("""
+            background-color: #2D3748; 
+            border-top-left-radius: 12px; 
+            border-top-right-radius: 12px;
+        """)
+        title_bar_layout = QHBoxLayout(title_bar)
+        title_bar_layout.setContentsMargins(15, 0, 15, 0)
+        title_bar_layout.setSpacing(0)
+        
+        # Tytuł
+        title_label = QLabel("⚙️ Ustawienia nakładki")
+        title_label.setStyleSheet("""
+            color: white; 
+            font-size: 14px; 
+            font-weight: bold;
+            padding: 0px;
+        """)
+        
+        # Przestrzeń pomiędzy tytułem a przyciskiem
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        
+        # Fancy przycisk zamknięcia - BEZ KONTENERA, bezpośrednio w layout
+        self.close_button = FancyCloseButton()
+        self.close_button.clicked.connect(self.close_settings)
+        self.close_button.setStyleSheet("""
+            FancyCloseButton {
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                border: none;
+                margin: 5px;
+            }
+        """)
+        
+        title_bar_layout.addWidget(title_label)
+        title_bar_layout.addWidget(spacer)
+        title_bar_layout.addWidget(self.close_button)
+
+        # ====== CONTENT ======
+        content_widget = QWidget()
+        content_widget.setStyleSheet("""
+            background-color: #1F232B; 
+            border-bottom-left-radius: 12px; 
+            border-bottom-right-radius: 12px;
+        """)
+        layout = QVBoxLayout(content_widget)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         layout.setContentsMargins(30, 20, 30, 20)
         layout.setSpacing(15)
-
-        # ====== Nagłówek ======
-        header = QLabel("⚙️ Ustawienia nakładki")
-        header.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
-        header.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        layout.addWidget(header)
 
         # ====== Przezroczystość ======
         label = QLabel("Przezroczystość nakładki:")
@@ -45,7 +161,7 @@ class SettingsWindow(QWidget):
         layout.addWidget(label)
 
         self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
-        self.opacity_slider.setRange(30, 100)
+        self.opacity_slider.setRange(10, 100)
         self.opacity_slider.setValue(100)
         self.opacity_slider.valueChanged.connect(self.on_opacity_change)
         self.opacity_slider.setStyleSheet(self._slider_style())
@@ -99,9 +215,17 @@ class SettingsWindow(QWidget):
         save_button = QPushButton("💾 Zapisz ustawienia")
         save_button.clicked.connect(self.save_settings)
         save_button.setStyleSheet("""
-            QPushButton { background-color: #2E8B57; color: white; border: none; padding: 8px 12px;
-                          border-radius: 10px; font-size: 13px; }
-            QPushButton:hover { background-color: #3CB371; }
+            QPushButton { 
+                background-color: #2E8B57; 
+                color: white; 
+                border: none; 
+                padding: 8px 12px;
+                border-radius: 10px; 
+                font-size: 13px; 
+            }
+            QPushButton:hover { 
+                background-color: #3CB371; 
+            }
         """)
         layout.addWidget(save_button, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -109,20 +233,53 @@ class SettingsWindow(QWidget):
         close_button = QPushButton("❌ Zamknij program")
         close_button.clicked.connect(self.confirm_close_app)
         close_button.setStyleSheet("""
-            QPushButton { background-color: #8B0000; color: white; border: none; padding: 8px 12px; border-radius: 10px; font-size: 13px; }
-            QPushButton:hover { background-color: #B22222; }
+            QPushButton { 
+                background-color: #8B0000; 
+                color: white; 
+                border: none; 
+                padding: 8px 12px; 
+                border-radius: 10px; 
+                font-size: 13px; 
+            }
+            QPushButton:hover { 
+                background-color: #B22222; 
+            }
         """)
         layout.addWidget(close_button, alignment=Qt.AlignmentFlag.AlignCenter)
 
+        # Dodajemy wszystko do głównego layoutu
+        main_layout.addWidget(title_bar)
+        main_layout.addWidget(content_widget)
+
+        # Zmienne do przeciągania okna
+        self.dragging = False
+        self.drag_position = None
+
         self.load_settings()
-        self.setStyleSheet("background-color: #1F232B; color: white;")
 
     def _slider_style(self):
         return """
-        QSlider::groove:horizontal { height: 8px; background: #2E8B57; border-radius: 4px; }
-        QSlider::handle:horizontal { background: #2E8B57; border: 2px solid white; width: 16px; height: 16px; margin: -4px 0; border-radius: 8px; }
-        QSlider::sub-page:horizontal { background: #2E8B57; border-radius: 4px; }
-        QSlider::add-page:horizontal { background: #555; border-radius: 4px; }
+        QSlider::groove:horizontal { 
+            height: 8px; 
+            background: #2E8B57; 
+            border-radius: 4px; 
+        }
+        QSlider::handle:horizontal { 
+            background: #2E8B57; 
+            border: 2px solid white; 
+            width: 16px; 
+            height: 16px; 
+            margin: -4px 0; 
+            border-radius: 8px; 
+        }
+        QSlider::sub-page:horizontal { 
+            background: #2E8B57; 
+            border-radius: 4px; 
+        }
+        QSlider::add-page:horizontal { 
+            background: #555; 
+            border-radius: 4px; 
+        }
         """
 
     # ========================== GRUPY ==========================
@@ -135,10 +292,25 @@ class SettingsWindow(QWidget):
         for text in labels:
             btn = QRadioButton(text)
             btn.setStyleSheet("""
-                QRadioButton { color: white; font-size: 13px; spacing: 8px; }
-                QRadioButton::indicator { width: 18px; height: 18px;
-                border-radius: 9px; border: 2px solid #3CB371; background-color: transparent; }
-                QRadioButton::indicator:checked { background-color: #3CB371; border: 2px solid #2E8B57; }
+                QRadioButton { 
+                    color: white; 
+                    font-size: 13px; 
+                    spacing: 8px; 
+                }
+                QRadioButton::indicator { 
+                    width: 18px; 
+                    height: 18px;
+                    border-radius: 9px; 
+                    border: 2px solid #3CB371; 
+                    background-color: transparent; 
+                }
+                QRadioButton::indicator:checked { 
+                    background-color: #3CB371; 
+                    border: 2px solid #2E8B57; 
+                }
+                QRadioButton:hover {
+                    color: #3CB371;
+                }
             """)
             group.addButton(btn)
             row.addWidget(btn)
@@ -146,11 +318,31 @@ class SettingsWindow(QWidget):
         layout.addLayout(row)
         return group
 
+    # ========================== OBSŁUGA PRZECIĄGANIA OKNA ==========================
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.dragging = True
+            self.drag_position = event.globalPosition().toPoint()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self.dragging and self.drag_position:
+            delta = event.globalPosition().toPoint() - self.drag_position
+            self.move(self.pos() + delta)
+            self.drag_position = event.globalPosition().toPoint()
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.dragging = False
+            self.drag_position = None
+            event.accept()
+
+    # ========================== HANDLERY ==========================
     def on_group_changed(self, button):
         """Automatycznie zapisuj gdy zmieniona zostanie grupa"""
         self.save_settings()
 
-    # ========================== HANDLERY ==========================
     def on_opacity_change(self, value):
         if self.overlay:
             try:
@@ -180,7 +372,7 @@ class SettingsWindow(QWidget):
 
     # ========================== USTAWIENIA ==========================
     def load_settings(self):
-        """Wczytuje ustawienia z pliku JSON - POPRAWIONE"""
+        """Wczytuje ustawienia z pliku JSON"""
         try:
             if os.path.exists(self.config_path):
                 with open(self.config_path, 'r', encoding='utf-8') as f:
@@ -197,7 +389,7 @@ class SettingsWindow(QWidget):
                     "group_k": None
                 }
 
-            # Ustawienia podstawowe - TERAZ POPRAWNIE WCZYTYWANE
+            # Ustawienia podstawowe
             opacity = data.get("opacity", 1.0)
             clickthrough = data.get("clickthrough", True)
             drag_enabled = data.get("drag_enabled", True)
@@ -225,7 +417,7 @@ class SettingsWindow(QWidget):
             print(f"Błąd wczytywania ustawień: {e}")
 
     def apply_settings_to_overlay(self, data):
-        """Zastosowuje ustawienia do overlay - POPRAWIONE"""
+        """Zastosowuje ustawienia do overlay"""
         try:
             if not self.overlay:
                 return
@@ -271,7 +463,7 @@ class SettingsWindow(QWidget):
         return checked.text() if checked else None
 
     def save_settings(self):
-        """Zapisuje ustawienia do pliku JSON - POPRAWIONE"""
+        """Zapisuje ustawienia do pliku JSON"""
         try:
             # Przygotuj ustawienia do zapisania
             settings_to_save = {
@@ -295,6 +487,7 @@ class SettingsWindow(QWidget):
             print(f"Błąd zapisywania ustawień: {e}")
 
     def confirm_close_app(self):
+        """Zamyka całą aplikację z potwierdzeniem"""
         reply = QMessageBox.question(
             self,
             "Zamknij program",
@@ -304,15 +497,16 @@ class SettingsWindow(QWidget):
         )
         if reply == QMessageBox.StandardButton.Yes:
             self.save_settings()
-            self.close_settings()
             if self.overlay:
                 self.overlay.confirm_close()
 
     def close_settings(self):
+        """Zamyka tylko okno ustawień (jak kliknięcie zębatki)"""
         self.hide()
         if self.overlay and hasattr(self.overlay, '_clickthrough_enabled') and self.overlay._clickthrough_enabled:
             self.overlay.enable_clickthrough()
 
     def closeEvent(self, event):
+        """Przechwytuje zdarzenie zamknięcia okna - teraz zamyka tylko okno ustawień"""
         self.close_settings()
         event.accept()

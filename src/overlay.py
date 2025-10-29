@@ -258,7 +258,7 @@ class OverlayWidget(QWidget):
     # ===== Opacity / Scale / Progress =====
     def update_opacity(self, value):
         """Zmiana przezroczystości"""
-        opacity = max(0.3, min(value / 100.0, 1.0))
+        opacity = max(0.1, min(value / 100.0, 1.0))
         self.setWindowOpacity(opacity)
         self.save_settings()
 
@@ -593,7 +593,7 @@ class OverlayWidget(QWidget):
     def start_minute_updates(self):
         """Rozpoczyna okresowe aktualizacje"""
         # Timer dla aktualizacji danych co minutę
-        self.update_timer.start(60 * 1000)  # 1 minuta
+        self.update_timer.start(20 * 1000)  # 20 sekund
         
         # Timer dla płynnego odświeżania progress bara co 5 sekund
         self.progress_timer.start(5000)  # 5 sekund

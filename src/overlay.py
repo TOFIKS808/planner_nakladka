@@ -2,7 +2,7 @@ from src.settings_window import SettingsWindow
 from src import api
 from PyQt6.QtWidgets import QWidget, QApplication, QMessageBox
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QFont, QMouseEvent, QCursor
-from PyQt6.QtCore import Qt, QRectF, pyqtProperty, QPropertyAnimation, QEasingCurve, QTimer
+from PyQt6.QtCore import Qt, QRectF, pyqtProperty, QPropertyAnimation, QEasingCurve, QTimer, QMutex
 from PyQt6.QtGui import QGuiApplication
 import keyboard
 import json, os
@@ -80,10 +80,10 @@ class OverlayWidget(QWidget):
             pass
         keyboard.add_hotkey("ctrl+q", self.toggle_overlay)
 
-        # Timer kursora
+        # Timer kursora - ZOPTYMALIZOWANY
         self.cursor_timer = QTimer(self)
         self.cursor_timer.timeout.connect(self.check_cursor_position)
-        self.cursor_timer.start(200)
+        self.cursor_timer.start(500)  # 500ms zamiast 200ms
         
         # Śledzenie poprzedniej pozycji kursora
         self._last_cursor_over_gear = False
@@ -91,6 +91,15 @@ class OverlayWidget(QWidget):
 
         # Cache ustawień w pamięci
         self._settings_cache = {}
+        
+        # Mutex dla bezpiecznego dostępu do cache
+        self._settings_mutex = QMutex()
+        
+        # Timer do opóźnionego zapisu ustawień
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.timeout.connect(self._delayed_save_settings)
+        self._save_pending = False
         
         # Wczytaj ustawienia do cache
         self.load_settings()
@@ -102,12 +111,59 @@ class OverlayWidget(QWidget):
         # Referencja do tray
         self.tray = None
 
-        # Timery dla aktualizacji
+        # Timery dla aktualizacji - ZOPTYMALIZOWANE
         self.update_timer = QTimer(self)
         self.update_timer.timeout.connect(self.minute_update)
         
         self.progress_timer = QTimer(self)
         self.progress_timer.timeout.connect(self.fast_progress_update)
+        
+        # Flaga zapobiegająca równoczesnym aktualizacjom API
+        self._api_update_in_progress = False
+
+    # ===== Optymalizowane zapisywanie ustawień =====
+    def request_save_settings(self):
+        """Żąda zapisu ustawień z opóźnieniem (debouncing)"""
+        if not self._save_pending:
+            self._save_pending = True
+            self._save_timer.start(1000)  # Zapisz po 1 sekundzie bez zmian
+
+    def _delayed_save_settings(self):
+        """Wykonuje opóźniony zapis ustawień"""
+        if self._save_pending:
+            self._save_settings_impl()
+            self._save_pending = False
+
+    def _save_settings_impl(self):
+        """Faktyczna implementacja zapisu ustawień"""
+        try:
+            self._settings_mutex.lock()
+            
+            settings_to_save = {
+                "opacity": round(self.windowOpacity(), 2),
+                "scale": round(self.width() / self.original_width, 2),
+                "clickthrough": self._clickthrough_enabled,
+                "drag_enabled": self.drag_enabled,
+                "scaling_enabled": self.scaling_enabled,
+                "position": [self.x(), self.y()],
+                "width": self.width(),
+                "height": self.height()
+            }
+            
+            # Aktualizuj tylko zmienione ustawienia
+            self._settings_cache.update(settings_to_save)
+            
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(self._settings_cache, f, indent=4)
+                            
+        except Exception as e:
+            print("Błąd zapisu ustawień:", e)
+        finally:
+            self._settings_mutex.unlock()
+
+    def save_settings(self):
+        """Zachowaj kompatybilność - użyj opóźnionego zapisu"""
+        self.request_save_settings()
 
     # ===== Clickthrough =====
     def enable_clickthrough(self):
@@ -124,11 +180,10 @@ class OverlayWidget(QWidget):
         
         # Aktualizuj UI
         self.update_ui_states()
-        self.save_settings()
+        self.request_save_settings()
 
     def disable_clickthrough(self):
         """Wyłącza clickthrough - okno reaguje na mysz"""
-        print("Disabling clickthrough")
         self._clickthrough_enabled = False
         if self.isVisible():
             self.setWindowFlags(
@@ -140,7 +195,7 @@ class OverlayWidget(QWidget):
         
         # Aktualizuj UI
         self.update_ui_states()
-        self.save_settings()
+        self.request_save_settings()
 
     def toggle_clickthrough_option(self, state):
         """Przełączanie clickthrough z aktualizacją UI"""
@@ -175,62 +230,64 @@ class OverlayWidget(QWidget):
         """Ustawia stan drag i aktualizuje UI"""
         self.drag_enabled = enabled
         self.update_ui_states()
-        self.save_settings()
+        self.request_save_settings()
 
     def toggle_drag_option(self, state):
         """Przełączanie drag z aktualizacją UI"""
         self.drag_enabled = (state == Qt.CheckState.Checked.value)
         self.update_ui_states()
-        self.save_settings()
+        self.request_save_settings()
 
     # ===== Scaling =====
     def set_scaling_enabled(self, enabled):
         """Ustawia stan scaling i aktualizuje UI"""
         self.scaling_enabled = enabled
         self.update_ui_states()
-        self.save_settings()
+        self.request_save_settings()
         self.update()  # Odśwież aby pokazać/ukryć uchwyt resize
 
     def toggle_scaling_option(self, state):
         """Przełączanie scaling z aktualizacją UI"""
         self.scaling_enabled = (state == Qt.CheckState.Checked.value)
         self.update_ui_states()
-        self.save_settings()
+        self.request_save_settings()
         self.update()  # Odśwież aby pokazać/ukryć uchwyt resize
 
     def check_cursor_position(self):
-        global_pos = QCursor.pos()
-        local_pos = self.mapFromGlobal(global_pos)
-        
-        current_over_gear = hasattr(self, "gear_rect") and self.gear_rect.contains(local_pos.toPointF())
-        current_over_resize = (self.scaling_enabled and hasattr(self, "resize_handle_rect") 
-                              and self.resize_handle_rect is not None
-                              and self.resize_handle_rect.contains(local_pos.toPointF()))
-        
-        # Sprawdź zmiany stanu
-        gear_just_left = self._last_cursor_over_gear and not current_over_gear
-        resize_just_left = self._last_cursor_over_resize and not current_over_resize
-        gear_just_entered = not self._last_cursor_over_gear and current_over_gear
-        resize_just_entered = not self._last_cursor_over_resize and current_over_resize
-        
-        # Aktualizuj poprzedni stan
-        self._last_cursor_over_gear = current_over_gear
-        self._last_cursor_over_resize = current_over_resize
-        
-        # Ustaw kursor
-        if current_over_gear:
-            self.setCursor(Qt.CursorShape.PointingHandCursor)
-            if self._clickthrough_enabled:
-                self.disable_clickthrough()
-        elif current_over_resize:
-            self.setCursor(Qt.CursorShape.SizeFDiagCursor)
-            if self._clickthrough_enabled:
-                self.disable_clickthrough()
-        else:
-            self.setCursor(Qt.CursorShape.ArrowCursor)
-            # PRZYWRÓĆ CLICKTHROUGH GDY KURSOR OPUSZCZA OBSZAR INTERAKTYWNY
-            if (gear_just_left or resize_just_left) and self._clickthrough_enabled:
-                self.enable_clickthrough()
+        """Optymalizowane sprawdzanie pozycji kursora"""
+        try:
+            global_pos = QCursor.pos()
+            local_pos = self.mapFromGlobal(global_pos)
+            
+            current_over_gear = hasattr(self, "gear_rect") and self.gear_rect.contains(local_pos.toPointF())
+            current_over_resize = (self.scaling_enabled and hasattr(self, "resize_handle_rect") 
+                                  and self.resize_handle_rect is not None
+                                  and self.resize_handle_rect.contains(local_pos.toPointF()))
+            
+            # Sprawdź zmiany stanu
+            gear_just_left = self._last_cursor_over_gear and not current_over_gear
+            resize_just_left = self._last_cursor_over_resize and not current_over_resize
+            
+            # Aktualizuj poprzedni stan
+            self._last_cursor_over_gear = current_over_gear
+            self._last_cursor_over_resize = current_over_resize
+            
+            # Ustaw kursor
+            if current_over_gear:
+                self.setCursor(Qt.CursorShape.PointingHandCursor)
+                if self._clickthrough_enabled:
+                    self.disable_clickthrough()
+            elif current_over_resize:
+                self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+                if self._clickthrough_enabled:
+                    self.disable_clickthrough()
+            else:
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+                # PRZYWRÓĆ CLICKTHROUGH GDY KURSOR OPUSZCZA OBSZAR INTERAKTYWNY
+                if (gear_just_left or resize_just_left) and self._clickthrough_enabled:
+                    self.enable_clickthrough()
+        except Exception as e:
+            print("Błąd w check_cursor_position:", e)
 
     # ===== Panel ustawień =====
     def toggle_settings(self):
@@ -260,7 +317,7 @@ class OverlayWidget(QWidget):
         """Zmiana przezroczystości"""
         opacity = max(0.1, min(value / 100.0, 1.0))
         self.setWindowOpacity(opacity)
-        self.save_settings()
+        self.request_save_settings()
 
     def getProgress(self):
         return self._progress
@@ -434,7 +491,7 @@ class OverlayWidget(QWidget):
             if self._was_clickthrough:
                 self.enable_clickthrough()
                 
-            self.save_settings()
+            self.request_save_settings()
             event.accept()
             return
             
@@ -443,7 +500,7 @@ class OverlayWidget(QWidget):
             self._drag_position = None
             if self._was_clickthrough:
                 self.enable_clickthrough()
-            self.save_settings()
+            self.request_save_settings()
             event.accept()
             return
             
@@ -537,27 +594,6 @@ class OverlayWidget(QWidget):
         if pos and len(pos) == 2:
             self.move(pos[0], pos[1])
 
-    def save_settings(self):
-        """Zapisz ustawienia z cache"""
-        try:
-            # Aktualizuj cache przed zapisem
-            self._settings_cache.update({
-                "opacity": round(self.windowOpacity(), 2),
-                "scale": round(self.width() / self.original_width, 2),
-                "clickthrough": self._clickthrough_enabled,
-                "drag_enabled": self.drag_enabled,
-                "scaling_enabled": self.scaling_enabled,
-                "position": [self.x(), self.y()],
-                "width": self.width(),
-                "height": self.height()
-            })
-            
-            with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump(self._settings_cache, f, indent=4)
-                            
-        except Exception as e:
-            print("Błąd zapisu ustawień:", e)
-
     def get_current_settings(self):
         """Zwraca aktualne ustawienia z cache"""
         return self._settings_cache.copy()
@@ -568,10 +604,10 @@ class OverlayWidget(QWidget):
             # AKTUALIZUJ TYLKO PRZEKAZANE KLUCZE - nie usuwaj istniejących
             for key, value in new_settings.items():
                 # ZAPISZ WARTOŚĆ NAWET JEŚLI JEST None - to oznacza "brak wybranej grupy"
-                self._settings_cache[key] = value            
-            # Zapisz do pliku
-            with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump(self._settings_cache, f, indent=4)
+                self._settings_cache[key] = value
+            
+            # Użyj opóźnionego zapisu
+            self.request_save_settings()
                             
         except Exception as e:
             print("Błąd aktualizacji ustawień:", e)
@@ -592,59 +628,68 @@ class OverlayWidget(QWidget):
     # ===== API =====
     def start_minute_updates(self):
         """Rozpoczyna okresowe aktualizacje"""
-        # Timer dla aktualizacji danych co minutę
-        self.update_timer.start(20 * 1000)  # 20 sekund
+        # Timer dla aktualizacji danych co 30 sekund (zamiast 20)
+        self.update_timer.start(30000)
         
-        # Timer dla płynnego odświeżania progress bara co 5 sekund
-        self.progress_timer.start(5000)  # 5 sekund
+        # Timer dla płynnego odświeżania progress bara co 10 sekund (zamiast 5)
+        self.progress_timer.start(10000)
         
         # Od razu wykonaj pierwszą aktualizację
         self.minute_update()
 
     def minute_update(self):
         """Aktualizuje wszystkie dane co minutę"""
-        # UŻYJ USTAWIEN Z CACHE zamiast wczytywać z pliku        
-        current_hour_obj = api.get_current_hour()
-        
-        # PRZEKAŻ USTAWIENIA Z CACHE DO FUNKCJI API - użyj nowej funkcji z pełnym łączeniem
-        currentLesson = api.get_current_lesson_with_full_block(self._settings_cache) or {
-            "syllabus": "Brak zajęć", 
-            "remaining_time": 0, 
-            "total_duration": 45, 
-            "is_break": False, 
-            "time_elapsed": 0
-        }
-        
-        # Pobierz następną lekcję
-        nextLesson = api.get_next_lesson(current_hour_obj, self._settings_cache) or {
-            "syllabus": "Brak dalszych zajęć", 
-            "hall": "-"
-        }
-
-        # SPRAWDŹ CZY NASTĘPNA LEKCJA MA TĘ SAMĄ NAZWĘ CO AKTUALNA
-        current_syllabus = currentLesson.get("syllabus", "")
-        next_syllabus = nextLesson.get("syllabus", "")
-        
-        # Jeśli następna lekcja ma tę samą nazwę, znajdź prawdziwą następną lekcję
-        if (current_syllabus == next_syllabus and 
-            current_syllabus not in ["Brak zajęć", "Przerwa", "Brak dalszych zajęć", "Koniec zajęć"]):
-            nextLesson = api.get_real_next_lesson(current_hour_obj, current_syllabus, self._settings_cache) or {
+        if self._api_update_in_progress:
+            return  # Pomijaj jeśli aktualizacja już trwa
+            
+        try:
+            self._api_update_in_progress = True
+            current_hour_obj = api.get_current_hour()
+            
+            # UŻYJ USTAWIEN Z CACHE zamiast wczytywać z pliku        
+            currentLesson = api.get_current_lesson_with_full_block(self._settings_cache) or {
+                "syllabus": "Brak zajęć", 
+                "remaining_time": 0, 
+                "total_duration": 45, 
+                "is_break": False, 
+                "time_elapsed": 0
+            }
+            
+            # Pobierz następną lekcję
+            nextLesson = api.get_next_lesson(current_hour_obj, self._settings_cache) or {
                 "syllabus": "Brak dalszych zajęć", 
                 "hall": "-"
             }
 
-        self.title = currentLesson.get("syllabus", "Brak zajęć")
-        
-        # ZAPISZ DANE JAKO ATRYBUTY DLA SZYBKIEGO ODŚWIEŻANIA
-        self.currentLesson = currentLesson
-        self.nextLesson = nextLesson
-        
-        # Zaktualizuj progress bar od razu
-        self.update_progress()
+            # SPRAWDŹ CZY NASTĘPNA LEKCJA MA TĘ SAMĄ NAZWĘ CO AKTUALNA
+            current_syllabus = currentLesson.get("syllabus", "")
+            next_syllabus = nextLesson.get("syllabus", "")
+            
+            # Jeśli następna lekcja ma tę samą nazwę, znajdź prawdziwą następną lekcję
+            if (current_syllabus == next_syllabus and 
+                current_syllabus not in ["Brak zajęć", "Przerwa", "Brak dalszych zajęć", "Koniec zajęć"]):
+                nextLesson = api.get_real_next_lesson(current_hour_obj, current_syllabus, self._settings_cache) or {
+                    "syllabus": "Brak dalszych zajęć", 
+                    "hall": "-"
+                }
+
+            self.title = currentLesson.get("syllabus", "Brak zajęć")
+            
+            # ZAPISZ DANE JAKO ATRYBUTY DLA SZYBKIEGO ODŚWIEŻANIA
+            self.currentLesson = currentLesson
+            self.nextLesson = nextLesson
+            
+            # Zaktualizuj progress bar od razu
+            self.update_progress()
+            
+        except Exception as e:
+            print("Błąd podczas aktualizacji danych:", e)
+        finally:
+            self._api_update_in_progress = False
 
     def fast_progress_update(self):
         """Szybka aktualizacja tylko progress bara"""
-        if hasattr(self, 'currentLesson'):
+        if hasattr(self, 'currentLesson') and not self._api_update_in_progress:
             self.update_progress()
 
     def update_progress(self):
@@ -688,7 +733,11 @@ class OverlayWidget(QWidget):
             QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            self.save_settings()
+            # Zapisz natychmiast przy zamknięciu
+            self._save_timer.stop()
+            if self._save_pending:
+                self._delayed_save_settings()
+                
             if hasattr(self, 'cursor_timer') and self.cursor_timer.isActive():
                 self.cursor_timer.stop()
             if hasattr(self, 'update_timer') and self.update_timer.isActive():

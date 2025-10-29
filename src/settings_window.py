@@ -82,6 +82,9 @@ class SettingsWindow(QWidget):
         self.setWindowTitle("⚙️ Ustawienia nakładki")
         self.setFixedWidth(420)
         
+        # Ustaw przezroczyste tło dla całego okna
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        
         # Usuwamy domyślny pasek tytułu i tworzymy własny
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         
@@ -105,7 +108,7 @@ class SettingsWindow(QWidget):
         title_bar = QWidget()
         title_bar.setFixedHeight(40)
         title_bar.setStyleSheet("""
-            background-color: #2D3748; 
+            background-color: rgba(45, 55, 72, 230); 
             border-top-left-radius: 12px; 
             border-top-right-radius: 12px;
         """)
@@ -146,7 +149,7 @@ class SettingsWindow(QWidget):
         # ====== CONTENT ======
         content_widget = QWidget()
         content_widget.setStyleSheet("""
-            background-color: #1F232B; 
+            background-color: rgba(31, 35, 43, 230); 
             border-bottom-left-radius: 12px; 
             border-bottom-right-radius: 12px;
         """)
@@ -216,7 +219,7 @@ class SettingsWindow(QWidget):
         save_button.clicked.connect(self.save_settings)
         save_button.setStyleSheet("""
             QPushButton { 
-                background-color: #2E8B57; 
+                background-color: rgba(46, 139, 87, 200); 
                 color: white; 
                 border: none; 
                 padding: 8px 12px;
@@ -224,7 +227,7 @@ class SettingsWindow(QWidget):
                 font-size: 13px; 
             }
             QPushButton:hover { 
-                background-color: #3CB371; 
+                background-color: rgba(60, 179, 113, 200); 
             }
         """)
         layout.addWidget(save_button, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -234,7 +237,7 @@ class SettingsWindow(QWidget):
         close_button.clicked.connect(self.confirm_close_app)
         close_button.setStyleSheet("""
             QPushButton { 
-                background-color: #8B0000; 
+                background-color: rgba(139, 0, 0, 200); 
                 color: white; 
                 border: none; 
                 padding: 8px 12px; 
@@ -242,7 +245,7 @@ class SettingsWindow(QWidget):
                 font-size: 13px; 
             }
             QPushButton:hover { 
-                background-color: #B22222; 
+                background-color: rgba(178, 34, 34, 200); 
             }
         """)
         layout.addWidget(close_button, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -261,11 +264,11 @@ class SettingsWindow(QWidget):
         return """
         QSlider::groove:horizontal { 
             height: 8px; 
-            background: #2E8B57; 
+            background: rgba(46, 139, 87, 200); 
             border-radius: 4px; 
         }
         QSlider::handle:horizontal { 
-            background: #2E8B57; 
+            background: rgba(46, 139, 87, 200); 
             border: 2px solid white; 
             width: 16px; 
             height: 16px; 
@@ -273,11 +276,11 @@ class SettingsWindow(QWidget):
             border-radius: 8px; 
         }
         QSlider::sub-page:horizontal { 
-            background: #2E8B57; 
+            background: rgba(46, 139, 87, 200); 
             border-radius: 4px; 
         }
         QSlider::add-page:horizontal { 
-            background: #555; 
+            background: rgba(85, 85, 85, 150); 
             border-radius: 4px; 
         }
         """
@@ -301,15 +304,15 @@ class SettingsWindow(QWidget):
                     width: 18px; 
                     height: 18px;
                     border-radius: 9px; 
-                    border: 2px solid #3CB371; 
+                    border: 2px solid rgba(60, 179, 113, 200); 
                     background-color: transparent; 
                 }
                 QRadioButton::indicator:checked { 
-                    background-color: #3CB371; 
-                    border: 2px solid #2E8B57; 
+                    background-color: rgba(60, 179, 113, 200); 
+                    border: 2px solid rgba(46, 139, 87, 200); 
                 }
                 QRadioButton:hover {
-                    color: #3CB371;
+                    color: rgba(60, 179, 113, 200);
                 }
             """)
             group.addButton(btn)

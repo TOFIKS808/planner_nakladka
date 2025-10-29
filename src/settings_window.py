@@ -123,11 +123,13 @@ class SettingsWindow(QWidget):
             font-size: 14px; 
             font-weight: bold;
             padding: 0px;
+            background: transparent;
         """)
         
         # Przestrzeń pomiędzy tytułem a przyciskiem
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        spacer.setStyleSheet("background: transparent;")
         
         # Fancy przycisk zamknięcia - BEZ KONTENERA, bezpośrednio w layout
         self.close_button = FancyCloseButton()
@@ -139,6 +141,7 @@ class SettingsWindow(QWidget):
                 font-weight: bold;
                 border: none;
                 margin: 5px;
+                background: transparent;
             }
         """)
         
@@ -160,7 +163,7 @@ class SettingsWindow(QWidget):
 
         # ====== Przezroczystość ======
         label = QLabel("Przezroczystość nakładki:")
-        label.setStyleSheet("color: white; font-size: 13px;")
+        label.setStyleSheet("color: white; font-size: 13px; background: transparent;")
         layout.addWidget(label)
 
         self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
@@ -173,9 +176,23 @@ class SettingsWindow(QWidget):
         # ====== Skalowanie ======
         self.scaling_checkbox = QCheckBox("Włącz skalowanie nakładki (przeciągnij za róg aby skalować)")
         self.scaling_checkbox.setStyleSheet("""
-            QCheckBox { color: white; font-size: 13px; spacing: 8px; }
-            QCheckBox::indicator { width: 18px; height: 18px; border-radius: 4px; border: 2px solid #3CB371; background-color: transparent; }
-            QCheckBox::indicator:checked { background-color: #3CB371; border: 2px solid #2E8B57; }
+            QCheckBox { 
+                color: white; 
+                font-size: 13px; 
+                spacing: 8px; 
+                background: transparent;
+            }
+            QCheckBox::indicator { 
+                width: 18px; 
+                height: 18px; 
+                border-radius: 4px; 
+                border: 2px solid #3CB371; 
+                background-color: transparent; 
+            }
+            QCheckBox::indicator:checked { 
+                background-color: #3CB371; 
+                border: 2px solid #2E8B57; 
+            }
         """)
         self.scaling_checkbox.stateChanged.connect(self.on_scaling_change)
         layout.addWidget(self.scaling_checkbox)
@@ -183,9 +200,23 @@ class SettingsWindow(QWidget):
         # ====== Click-through ======
         self.clickthrough_checkbox = QCheckBox("Pozwól klikać przez nakładkę")
         self.clickthrough_checkbox.setStyleSheet("""
-            QCheckBox { color: white; font-size: 13px; spacing: 8px; }
-            QCheckBox::indicator { width: 18px; height: 18px; border-radius: 4px; border: 2px solid #3CB371; background-color: transparent; }
-            QCheckBox::indicator:checked { background-color: #3CB371; border: 2px solid #2E8B57; }
+            QCheckBox { 
+                color: white; 
+                font-size: 13px; 
+                spacing: 8px; 
+                background: transparent;
+            }
+            QCheckBox::indicator { 
+                width: 18px; 
+                height: 18px; 
+                border-radius: 4px; 
+                border: 2px solid #3CB371; 
+                background-color: transparent; 
+            }
+            QCheckBox::indicator:checked { 
+                background-color: #3CB371; 
+                border: 2px solid #2E8B57; 
+            }
         """)
         self.clickthrough_checkbox.stateChanged.connect(self.on_clickthrough_change)
         layout.addWidget(self.clickthrough_checkbox)
@@ -193,9 +224,23 @@ class SettingsWindow(QWidget):
         # ====== Dragging ======
         self.drag_checkbox = QCheckBox("Pozwól przenosić nakładkę")
         self.drag_checkbox.setStyleSheet("""
-            QCheckBox { color: white; font-size: 13px; spacing: 8px; }
-            QCheckBox::indicator { width: 18px; height: 18px; border-radius: 4px; border: 2px solid #3CB371; background-color: transparent; }
-            QCheckBox::indicator:checked { background-color: #3CB371; border: 2px solid #2E8B57; }
+            QCheckBox { 
+                color: white; 
+                font-size: 13px; 
+                spacing: 8px; 
+                background: transparent;
+            }
+            QCheckBox::indicator { 
+                width: 18px; 
+                height: 18px; 
+                border-radius: 4px; 
+                border: 2px solid #3CB371; 
+                background-color: transparent; 
+            }
+            QCheckBox::indicator:checked { 
+                background-color: #3CB371; 
+                border: 2px solid #2E8B57; 
+            }
         """)
         self.drag_checkbox.stateChanged.connect(self.on_drag_change)
         layout.addWidget(self.drag_checkbox)
@@ -203,13 +248,22 @@ class SettingsWindow(QWidget):
         # ====== Grupy zajęciowe ======
         layout.addSpacerItem(QSpacerItem(10, 15, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
 
-        layout.addWidget(QLabel("Grupa C:"))
+        # Etykiety grup - BEZ TŁA
+        group_label_style = "color: white; font-size: 13px; font-weight: bold; background: transparent;"
+        
+        group_c_label = QLabel("Grupa C:")
+        group_c_label.setStyleSheet(group_label_style)
+        layout.addWidget(group_c_label)
         self.group_c = self.create_group(["11K1", "11K2"], layout)
 
-        layout.addWidget(QLabel("Grupa L:"))
+        group_l_label = QLabel("Grupa L:")
+        group_l_label.setStyleSheet(group_label_style)
+        layout.addWidget(group_l_label)
         self.group_l = self.create_group(["L01", "L02", "L03", "L04", "L05"], layout)
 
-        layout.addWidget(QLabel("Grupa K:"))
+        group_k_label = QLabel("Grupa K:")
+        group_k_label.setStyleSheet(group_label_style)
+        layout.addWidget(group_k_label)
         self.group_k = self.create_group(["K01", "K02", "K03", "K04"], layout)
 
         # ====== Przyciski ======
@@ -299,6 +353,7 @@ class SettingsWindow(QWidget):
                     color: white; 
                     font-size: 13px; 
                     spacing: 8px; 
+                    background: transparent;
                 }
                 QRadioButton::indicator { 
                     width: 18px; 
@@ -490,7 +545,7 @@ class SettingsWindow(QWidget):
             print(f"Błąd zapisywania ustawień: {e}")
 
     def confirm_close_app(self):
-        """Zamyka całą aplikację z potwierdzeniem"""
+        """Zamyka całą aplikację z jednym potwierdzeniem"""
         reply = QMessageBox.question(
             self,
             "Zamknij program",
@@ -500,8 +555,14 @@ class SettingsWindow(QWidget):
         )
         if reply == QMessageBox.StandardButton.Yes:
             self.save_settings()
+            # Zamykamy całą aplikację
             if self.overlay:
-                self.overlay.confirm_close()
+                if hasattr(self.overlay, 'close'):
+                    self.overlay.close()
+                elif hasattr(self.overlay, 'quit'):
+                    self.overlay.quit()
+            # Zamykamy również okno ustawień
+            self.close()
 
     def close_settings(self):
         """Zamyka tylko okno ustawień (jak kliknięcie zębatki)"""

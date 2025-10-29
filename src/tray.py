@@ -14,7 +14,7 @@ class Tray:
         self.overlay = overlay
 
         # Tworzymy ikonę tray
-        self.tray_icon = QSystemTrayIcon(QIcon("images/logo.ico"), self.app)
+        self.tray_icon = QSystemTrayIcon(QIcon("images/ikona.ico"), self.app)
         self.tray_icon.setToolTip("Overlay")
 
         # Budujemy menu

@@ -1,11 +1,13 @@
 from src.settings_window import SettingsWindow
 from src import api
+from src import api2
 from PyQt6.QtWidgets import QWidget, QApplication, QMessageBox
-from PyQt6.QtGui import QColor, QPainter, QPainterPath, QFont, QMouseEvent, QCursor
+from PyQt6.QtGui import QColor, QPainter, QPainterPath, QFont, QMouseEvent, QCursor, QLinearGradient
 from PyQt6.QtCore import Qt, QRectF, pyqtProperty, QPropertyAnimation, QEasingCurve, QTimer, QMutex
 from PyQt6.QtGui import QGuiApplication
 import keyboard
 import json, os
+from datetime import datetime
 
 class OverlayWidget(QWidget):
     def __init__(self, title, left_text, right_text, progress=0.0):
@@ -26,12 +28,14 @@ class OverlayWidget(QWidget):
         self.left_text = left_text
         self.right_text = right_text
 
-        # Styl
-        self.bg_color = QColor(31, 35, 43, 255)
-        self.progress_color = QColor(46, 139, 87, 255)
-        self.text_color = QColor(255, 255, 255, 255)
-        self.shadow_color = QColor(0, 0, 0, 100)
-        self.radius = 15
+        # Styl - NOWA PALETA KOLORÓW
+        self.bg_color = QColor(23, 28, 40, 240)  # Ciemniejszy, bardziej nowoczesny
+        self.progress_gradient_start = QColor(74, 144, 226)  # Niebieski
+        self.progress_gradient_end = QColor(103, 230, 220)   # Cyjan
+        self.text_color = QColor(240, 244, 255, 255)  # Bardziej czytelny biały
+        self.shadow_color = QColor(10, 15, 25, 120)   # Lżejszy cień
+        self.progress_track_color = QColor(45, 55, 75, 180)  # Kolor tła paska
+        self.radius = 12  # Mniejsze zaokrąglenie
 
         # Zezwól na zmianę rozmiaru
         self.setMinimumSize(200, 48)
@@ -259,49 +263,29 @@ class OverlayWidget(QWidget):
             global_pos = QCursor.pos()
             local_pos = self.mapFromGlobal(global_pos)
             
-            current_over_gear = hasattr(self, "gear_rect") and self.gear_rect.contains(local_pos.toPointF())
+            # Sprawdź tylko uchwyt resize (zębatka usunięta)
             current_over_resize = (self.scaling_enabled and hasattr(self, "resize_handle_rect") 
                                   and self.resize_handle_rect is not None
                                   and self.resize_handle_rect.contains(local_pos.toPointF()))
             
             # Sprawdź zmiany stanu
-            gear_just_left = self._last_cursor_over_gear and not current_over_gear
             resize_just_left = self._last_cursor_over_resize and not current_over_resize
             
             # Aktualizuj poprzedni stan
-            self._last_cursor_over_gear = current_over_gear
             self._last_cursor_over_resize = current_over_resize
             
             # Ustaw kursor
-            if current_over_gear:
-                self.setCursor(Qt.CursorShape.PointingHandCursor)
-                if self._clickthrough_enabled:
-                    self.disable_clickthrough()
-            elif current_over_resize:
+            if current_over_resize:
                 self.setCursor(Qt.CursorShape.SizeFDiagCursor)
                 if self._clickthrough_enabled:
                     self.disable_clickthrough()
             else:
                 self.setCursor(Qt.CursorShape.ArrowCursor)
                 # PRZYWRÓĆ CLICKTHROUGH GDY KURSOR OPUSZCZA OBSZAR INTERAKTYWNY
-                if (gear_just_left or resize_just_left) and self._clickthrough_enabled:
+                if resize_just_left and self._clickthrough_enabled:
                     self.enable_clickthrough()
         except Exception as e:
             print("Błąd w check_cursor_position:", e)
-
-    # ===== Panel ustawień =====
-    def toggle_settings(self):
-        if hasattr(self, "settings_window"):
-            if self.settings_window.isVisible():
-                self.settings_window.hide()
-                # Przywróć clickthrough po zamknięciu ustawień
-                if self._clickthrough_enabled:
-                    self.apply_clickthrough_state()
-            else:
-                self.settings_window.show()
-                self.settings_window.raise_()
-                # Wyłącz clickthrough gdy ustawienia są otwarte
-                self.disable_clickthrough()
 
     # ===== Toggle widoczności =====
     def toggle_overlay(self):
@@ -334,97 +318,122 @@ class OverlayWidget(QWidget):
         self.anim.setEndValue(max(0.0, min(1.0, target_value)))
         self.anim.start()
 
-    # ===== Malowanie =====
+    # ===== Malowanie - POPRAWIONA WERSJA (BEZ ZĘBATKI) =====
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect = self.rect()
 
-        # --- Tło ---
+        # --- Tło z lekkim gradientem ---
+        bg_gradient = QLinearGradient(0, 0, 0, rect.height())
+        bg_gradient.setColorAt(0, QColor(28, 33, 45, 240))
+        bg_gradient.setColorAt(1, QColor(23, 28, 40, 240))
+        
         path = QPainterPath()
         path.addRoundedRect(QRectF(rect), self.radius, self.radius)
-        painter.fillPath(path, self.bg_color)
+        painter.fillPath(path, bg_gradient)
 
-        # --- Szara prowadnica ---
-        bar_height = int(8 * self.scale_factor)
-        radius_scaled = int(self.radius * self.scale_factor)
-        guide_path = QPainterPath()
-        guide_path.moveTo(rect.x(), rect.y() + bar_height)
-        guide_path.lineTo(rect.x(), rect.y() + radius_scaled)
-        guide_path.quadTo(rect.x(), rect.y(), rect.x() + radius_scaled, rect.y())
-        guide_path.lineTo(rect.x() + rect.width() - radius_scaled, rect.y())
-        guide_path.quadTo(rect.x() + rect.width(), rect.y(), rect.x() + rect.width(), rect.y() + radius_scaled)
-        guide_path.lineTo(rect.x() + rect.width(), rect.y() + bar_height)
-        guide_path.closeSubpath()
-        painter.fillPath(guide_path, QColor(100, 100, 100))
+        # --- Cień wewnętrzny dla głębi ---
+        painter.setPen(QColor(255, 255, 255, 15))
+        painter.drawRoundedRect(QRectF(rect.x() + 0.5, rect.y() + 0.5, rect.width() - 1, rect.height() - 1), 
+                              self.radius, self.radius)
 
-        # --- Zielony pasek postępu ---
-        progress_width = int(rect.width() * max(0.0, min(1.0, self._progress)))
+        # --- Pasek postępu - NOWY WYGLĄD ---
+        bar_height = int(10 * self.scale_factor)  # Nieco cieńszy pasek
+        bar_margin_top = int(50 * self.scale_factor)  # Pozycja paska
+        radius_scaled = int(6 * self.scale_factor)  # Mniejsze zaokrąglenie dla paska
+
+        # Tło paska (track)
+        track_rect = QRectF(
+            rect.x() + 15 * self.scale_factor,
+            rect.y() + bar_margin_top,
+            rect.width() - 30 * self.scale_factor,
+            bar_height
+        )
+        
+        track_path = QPainterPath()
+        track_path.addRoundedRect(track_rect, radius_scaled, radius_scaled)
+        painter.fillPath(track_path, self.progress_track_color)
+
+        # Zielony pasek postępu z gradientem
+        progress_width = int(track_rect.width() * max(0.0, min(1.0, self._progress)))
         if progress_width > 0:
+            progress_rect = QRectF(
+                track_rect.x(),
+                track_rect.y(),
+                progress_width,
+                bar_height
+            )
+            
             progress_path = QPainterPath()
-            progress_path.moveTo(rect.x(), rect.y() + bar_height)
-            progress_path.lineTo(rect.x(), rect.y() + radius_scaled)
-            progress_path.quadTo(rect.x(), rect.y(), rect.x() + radius_scaled, rect.y())
-            if progress_width >= rect.width() - radius_scaled:
-                progress_path.lineTo(rect.x() + progress_width - radius_scaled, rect.y())
-                progress_path.quadTo(rect.x() + progress_width, rect.y(), rect.x() + progress_width, rect.y() + radius_scaled)
-            else:
-                progress_path.lineTo(rect.x() + progress_width, rect.y())
-            progress_path.lineTo(rect.x() + progress_width, rect.y() + bar_height)
-            progress_path.closeSubpath()
-            painter.fillPath(progress_path, self.progress_color)
+            progress_path.addRoundedRect(progress_rect, radius_scaled, radius_scaled)
+            
+            # Gradient dla paska postępu
+            progress_gradient = QLinearGradient(
+                progress_rect.x(), progress_rect.y(),
+                progress_rect.x(), progress_rect.y() + progress_rect.height()
+            )
+            progress_gradient.setColorAt(0, self.progress_gradient_start)
+            progress_gradient.setColorAt(1, self.progress_gradient_end)
+            
+            painter.fillPath(progress_path, progress_gradient)
+
+            # Efekt świetlny na górze paska
+            highlight_gradient = QLinearGradient(
+                progress_rect.x(), progress_rect.y(),
+                progress_rect.x(), progress_rect.y() + progress_rect.height() * 0.4
+            )
+            highlight_gradient.setColorAt(0, QColor(255, 255, 255, 60))
+            highlight_gradient.setColorAt(1, QColor(255, 255, 255, 0))
+            
+            highlight_path = QPainterPath()
+            highlight_path.addRoundedRect(progress_rect, radius_scaled, radius_scaled)
+            painter.fillPath(highlight_path, highlight_gradient)
 
         # --- Teksty ---
-        painter.setFont(QFont("Segoe UI", int(20 * self.scale_factor), QFont.Weight.Medium))
+        # Tytuł
+        painter.setFont(QFont("Segoe UI", int(18 * self.scale_factor), QFont.Weight.Bold))
         painter.setPen(self.shadow_color)
-        painter.drawText(rect.adjusted(2, int(22 * self.scale_factor), 2, 0), Qt.AlignmentFlag.AlignHCenter, self.title)
+        painter.drawText(rect.adjusted(1, int(28 * self.scale_factor), 1, 0), 
+                        Qt.AlignmentFlag.AlignHCenter, self.title)
         painter.setPen(self.text_color)
-        painter.drawText(rect.adjusted(0, int(20 * self.scale_factor), 0, 0), Qt.AlignmentFlag.AlignHCenter, self.title)
+        painter.drawText(rect.adjusted(0, int(25 * self.scale_factor), 0, 0), 
+                        Qt.AlignmentFlag.AlignHCenter, self.title)
 
-        painter.setFont(QFont("Segoe UI", int(12 * self.scale_factor)))
+        # Tekst dolny
+        painter.setFont(QFont("Segoe UI", int(11 * self.scale_factor)))
         painter.setPen(self.shadow_color)
-        painter.drawText(rect.adjusted(int(27 * self.scale_factor), int(62 * self.scale_factor), 2, 0), Qt.AlignmentFlag.AlignLeft, self.left_text)
-        painter.drawText(rect.adjusted(-int(23 * self.scale_factor), int(62 * self.scale_factor), -int(18 * self.scale_factor), 0), Qt.AlignmentFlag.AlignRight, self.right_text)
+        painter.drawText(rect.adjusted(int(27 * self.scale_factor), int(72 * self.scale_factor), 2, 0), 
+                        Qt.AlignmentFlag.AlignLeft, self.left_text)
+        painter.drawText(rect.adjusted(-int(23 * self.scale_factor), int(72 * self.scale_factor), -int(18 * self.scale_factor), 0), 
+                        Qt.AlignmentFlag.AlignRight, self.right_text)
         painter.setPen(self.text_color)
-        painter.drawText(rect.adjusted(int(25 * self.scale_factor), int(60 * self.scale_factor), 0, 0), Qt.AlignmentFlag.AlignLeft, self.left_text)
-        painter.drawText(rect.adjusted(-int(25 * self.scale_factor), int(60 * self.scale_factor), -int(20 * self.scale_factor), 0), Qt.AlignmentFlag.AlignRight, self.right_text)
-
-        # --- Zębatka ---
-        gear_size = int(20 * self.scale_factor)
-        self.gear_rect = QRectF(rect.width() - gear_size - 12, gear_size - 10, gear_size, gear_size)
-        painter.setFont(QFont("Segoe UI Symbol", int(16 * self.scale_factor)))
-        painter.drawText(self.gear_rect, Qt.AlignmentFlag.AlignCenter, "⚙️")
+        painter.drawText(rect.adjusted(int(25 * self.scale_factor), int(70 * self.scale_factor), 0, 0), 
+                        Qt.AlignmentFlag.AlignLeft, self.left_text)
+        painter.drawText(rect.adjusted(-int(25 * self.scale_factor), int(70 * self.scale_factor), -int(20 * self.scale_factor), 0), 
+                        Qt.AlignmentFlag.AlignRight, self.right_text)
 
         # --- Uchwyt do resize w prawym dolnym rogu (TYLKO jeśli skalowanie włączone) ---
         if self.scaling_enabled:
-            handle_size = int(12 * self.scale_factor)
+            handle_size = int(25 * self.scale_factor)
             self.resize_handle_rect = QRectF(
-                rect.width() - handle_size - 2,
-                rect.height() - handle_size - 2,
+                rect.width() - handle_size - 4 * self.scale_factor,
+                rect.height() - handle_size - 4 * self.scale_factor,
                 handle_size,
                 handle_size
             )
             
-            painter.setBrush(QColor(100, 100, 100, 150))
-            painter.setPen(Qt.PenStyle.NoPen)
+            # Nowy styl uchwytu resize
+            resize_path = QPainterPath()
+            resize_path.moveTo(self.resize_handle_rect.right(), self.resize_handle_rect.bottom())
+            resize_path.lineTo(self.resize_handle_rect.right(), self.resize_handle_rect.top() + handle_size * 0.6)
+            resize_path.lineTo(self.resize_handle_rect.left() + handle_size * 0.6, self.resize_handle_rect.bottom())
+            resize_path.closeSubpath()
             
-            handle_path = QPainterPath()
-            handle_path.moveTo(self.resize_handle_rect.right(), self.resize_handle_rect.bottom())
-            handle_path.lineTo(self.resize_handle_rect.right(), self.resize_handle_rect.top())
-            handle_path.lineTo(self.resize_handle_rect.left(), self.resize_handle_rect.bottom())
-            handle_path.closeSubpath()
-            
-            painter.drawPath(handle_path)
-        else:
-            self.resize_handle_rect = None
+            painter.fillPath(resize_path, QColor(100, 110, 130, 200))
 
     # ===== Drag & Drop =====
     def mousePressEvent(self, event: QMouseEvent):
-        if hasattr(self, "gear_rect") and self.gear_rect.contains(event.position()):
-            self.toggle_settings()
-            event.accept()
-            return
-
         # Sprawdź czy kliknięto w uchwyt resize (TYLKO jeśli skalowanie włączone i rect istnieje)
         if (self.scaling_enabled and hasattr(self, "resize_handle_rect")
             and self.resize_handle_rect is not None
@@ -468,7 +477,7 @@ class OverlayWidget(QWidget):
             
             self.resize(new_width, new_height)
             self.scale_factor = new_width / self.original_width
-            self.radius = int(15 * self.scale_factor)
+            self.radius = int(12 * self.scale_factor)  # Zaktualizuj radius
             
             event.accept()
             return
@@ -644,34 +653,21 @@ class OverlayWidget(QWidget):
             
         try:
             self._api_update_in_progress = True
-            current_hour_obj = api.get_current_hour()
             
             # UŻYJ USTAWIEN Z CACHE zamiast wczytywać z pliku        
-            currentLesson = api.get_current_lesson_with_full_block(self._settings_cache) or {
+            currentLesson = api2.get_current_segment() or {
                 "syllabus": "Brak zajęć", 
                 "remaining_time": 0, 
-                "total_duration": 45, 
+                "total_duration": 0, 
                 "is_break": False, 
                 "time_elapsed": 0
             }
             
             # Pobierz następną lekcję
-            nextLesson = api.get_next_lesson(current_hour_obj, self._settings_cache) or {
-                "syllabus": "Brak dalszych zajęć", 
-                "hall": "-"
+            nextLesson = api2.get_next_segment() or {
+                "syllabus": "Brak dalszych zajęć",
+                "hall": "-",
             }
-
-            # SPRAWDŹ CZY NASTĘPNA LEKCJA MA TĘ SAMĄ NAZWĘ CO AKTUALNA
-            current_syllabus = currentLesson.get("syllabus", "")
-            next_syllabus = nextLesson.get("syllabus", "")
-            
-            # Jeśli następna lekcja ma tę samą nazwę, znajdź prawdziwą następną lekcję
-            if (current_syllabus == next_syllabus and 
-                current_syllabus not in ["Brak zajęć", "Przerwa", "Brak dalszych zajęć", "Koniec zajęć"]):
-                nextLesson = api.get_real_next_lesson(current_hour_obj, current_syllabus, self._settings_cache) or {
-                    "syllabus": "Brak dalszych zajęć", 
-                    "hall": "-"
-                }
 
             self.title = currentLesson.get("syllabus", "Brak zajęć")
             
@@ -697,31 +693,47 @@ class OverlayWidget(QWidget):
         if not hasattr(self, 'currentLesson'):
             return
             
-        remaining_time = self.currentLesson.get("remaining_time", 0)
-        total_duration = self.currentLesson.get("total_duration", 45)
-        time_elapsed = self.currentLesson.get("time_elapsed", 0)
-        is_break = self.currentLesson.get("is_break", False)
+        try:
+            # Pobierz czasy z aktualnej lekcji
+            start_time_str = self.currentLesson.get("start")
+            end_time_str = self.currentLesson.get("end")
+            
+            if not start_time_str or not end_time_str:
+                self.setProgress(0.0)
+                return
+                
+            # Pobierz aktualną datę
+            today = datetime.now().date()
+            
+            # Połącz aktualną datę z czasem rozpoczęcia i zakończenia
+            start_datetime = datetime.combine(today, datetime.strptime(start_time_str, '%H:%M').time())
+            end_datetime = datetime.combine(today, datetime.strptime(end_time_str, '%H:%M').time())
+            
+            current_time = datetime.now()
+            
+            # Jeśli lekcja kończy się po północy, dodaj jeden dzień do czasu zakończenia
+            if end_datetime < start_datetime:
+                end_datetime = end_datetime.replace(day=end_datetime.day + 1)
+            
+            # Oblicz całkowity czas trwania i czas pozostały
+            total_duration = (end_datetime - start_datetime).total_seconds() / 60  # w minutach
+            elapsed_time = (current_time - start_datetime).total_seconds() / 60  # w minutach
+            remaining_time = (end_datetime - current_time).total_seconds() / 60  # w minutach
 
-        self.left_text = f"{round(remaining_time)}min → {self.nextLesson.get('syllabus', '-')}"
-        self.right_text = self.nextLesson.get("hall", "-")
+            self.left_text = f"{round(remaining_time)}min → {self.nextLesson.get('syllabus', '-')}"
+            self.right_text = self.nextLesson.get("hall", "-")
 
-        # OBLICZANIE PROGRESU
-        if is_break:
-            # Dla przerwy: progres = czas który minął / całkowity czas przerwy
+            # Oblicz postęp (0.0 - 1.0)
             if total_duration > 0:
-                progress = time_elapsed / total_duration
+                progress = min(max(elapsed_time / total_duration, 0.0), 1.0)
             else:
                 progress = 0.0
-        else:
-            # Dla lekcji: progres = czas który minął / całkowity czas bloku
-            if total_duration > 0:
-                progress = time_elapsed / total_duration
-            else:
-                progress = 0.0
-        
-        progress = max(0.0, min(1.0, progress))
-        
-        self.setProgress(progress)
+                
+            self.setProgress(progress)
+            
+        except Exception as e:
+            print(f"Błąd podczas aktualizacji postępu: {e}")
+            self.setProgress(0.0)
 
     # ===== Zamknięcie programu =====
     def confirm_close(self):

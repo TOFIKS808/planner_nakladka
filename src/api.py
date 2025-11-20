@@ -8,11 +8,11 @@ def fetch_timetable(settings=None):
         if settings is None:
                 settings = load_settings()
         
-        if settings["group_c"] is not None: group_c = settings["group_c"][-1]
+        if settings["group_c"] is not None or settings["group_l"] != " ": group_c = settings["group_c"][-1]
         else: group_c = 1
-        if settings["group_k"] is not None: group_k = settings["group_k"][-1]
+        if settings["group_k"] is not None or settings["group_l"] != " ": group_k = settings["group_k"][-1]
         else: group_k = 1
-        if settings["group_l"] is not None: group_l = settings["group_l"][-1]
+        if settings["group_l"] is not None or settings["group_l"] != " ": group_l = settings["group_l"][-1]
         else: group_l = 1
         response = requests.get()
         response.raise_for_status()

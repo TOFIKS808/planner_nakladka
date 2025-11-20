@@ -1,6 +1,5 @@
 from src.settings_window import SettingsWindow
 from src import api
-from src import api2
 from PyQt6.QtWidgets import QWidget, QApplication, QMessageBox
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QFont, QMouseEvent, QCursor, QLinearGradient
 from PyQt6.QtCore import Qt, QRectF, pyqtProperty, QPropertyAnimation, QEasingCurve, QTimer, QMutex
@@ -169,6 +168,61 @@ class OverlayWidget(QWidget):
         """Zachowaj kompatybilność - użyj opóźnionego zapisu"""
         self.request_save_settings()
 
+    def save_settings_immediately(self):
+        """Zapisuje ustawienia natychmiast (dla SettingsWindow)"""
+        self._save_timer.stop()
+        if self._save_pending:
+            self._delayed_save_settings()
+        else:
+            self._save_settings_impl()
+
+    # ===== Metody dostępu do ustawień =====
+    def get_current_settings(self):
+        """Zwraca aktualne ustawienia z cache"""
+        try:
+            self._settings_mutex.lock()
+            return self._settings_cache.copy()
+        finally:
+            self._settings_mutex.unlock()
+
+    def get_group_settings(self):
+        """Pobiera aktualne ustawienia grup z cache"""
+        settings = self.get_current_settings()
+        return {
+            "group_c": settings.get("group_c"),
+            "group_l": settings.get("group_l"), 
+            "group_k": settings.get("group_k")
+        }
+
+    def update_settings(self, new_settings):
+        """Aktualizuje ustawienia w cache i zapisuje do pliku - TYLKO przekazane wartości"""
+        try:            
+            self._settings_mutex.lock()
+            
+            # AKTUALIZUJ TYLKO PRZEKAZANE KLUCZE - nie usuwaj istniejących
+            for key, value in new_settings.items():
+                # ZACHOWAJ ISTNIEJĄCE WARTOŚCI GRUP JEŚLI NOWA WARTOŚĆ JEST None
+                if key in ["group_c", "group_l", "group_k"] and value is None:
+                    current_value = self._settings_cache.get(key)
+                    if current_value is not None:
+                        # Zachowaj istniejącą wartość, nie nadpisuj na None
+                        continue
+                
+                # ZAPISZ WARTOŚĆ DLA WSZYSTKICH INNYCH PRZYPADKÓW
+                self._settings_cache[key] = value
+            
+            # Użyj opóźnionego zapisu
+            self.request_save_settings()
+                        
+        except Exception as e:
+            print("Błąd aktualizacji ustawień:", e)
+        finally:
+            self._settings_mutex.unlock()
+
+    def update_group_settings(self, group_settings):
+        """Aktualizuje ustawienia grup w cache"""
+        self.update_settings(group_settings)
+
     # ===== Clickthrough =====
     def enable_clickthrough(self):
         """Włącza clickthrough - okno staje się przezroczyste dla myszy"""
@@ -318,7 +372,51 @@ class OverlayWidget(QWidget):
         self.anim.setEndValue(max(0.0, min(1.0, target_value)))
         self.anim.start()
 
-    # ===== Malowanie - POPRAWIONA WERSJA (BEZ ZĘBATKI) =====
+    # ===== Funkcje pomocnicze do skalowania tekstu =====
+    def get_scaled_font_size(self, painter, text, max_width, base_size, is_bold=False):
+        """Znajduje optymalny rozmiar czcionki dla tekstu"""
+        font_size = base_size
+        min_font_size = 8  # Minimalny rozmiar czcionki
+        
+        while font_size >= min_font_size:
+            font = QFont("Segoe UI", int(font_size * self.scale_factor))
+            if is_bold:
+                font.setWeight(QFont.Weight.Bold)
+            painter.setFont(font)
+            
+            # Sprawdź szerokość tekstu
+            text_rect = painter.boundingRect(QRectF(0, 0, 10000, 100), 
+                                           Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextSingleLine, 
+                                           text)
+            
+            if text_rect.width() <= max_width:
+                break
+                
+            font_size -= 0.5  # Zmniejszaj stopniowo
+            
+        return max(min_font_size, font_size)
+
+    def draw_scaled_text(self, painter, rect, text, alignment, base_font_size, is_bold=False, color=None):
+        """Rysuje tekst z automatycznie skalowaną czcionką"""
+        if color:
+            painter.setPen(color)
+        
+        # Oblicz dostępną szerokość (z marginesem bezpieczeństwa)
+        available_width = rect.width() * 0.9
+        
+        # Znajdź optymalny rozmiar czcionki
+        optimal_size = self.get_scaled_font_size(painter, text, available_width, base_font_size, is_bold)
+        
+        # Ustaw czcionkę
+        font = QFont("Segoe UI", int(optimal_size * self.scale_factor))
+        if is_bold:
+            font.setWeight(QFont.Weight.Bold)
+        painter.setFont(font)
+        
+        # Narysuj tekst
+        painter.drawText(rect, alignment | Qt.TextFlag.TextSingleLine, text)
+
+    # ===== Malowanie - POPRAWIONA WERSJA Z DZIAŁAJĄCYM SKALOWANIEM =====
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -390,28 +488,65 @@ class OverlayWidget(QWidget):
             highlight_path.addRoundedRect(progress_rect, radius_scaled, radius_scaled)
             painter.fillPath(highlight_path, highlight_gradient)
 
-        # --- Teksty ---
-        # Tytuł
-        painter.setFont(QFont("Segoe UI", int(18 * self.scale_factor), QFont.Weight.Bold))
-        painter.setPen(self.shadow_color)
-        painter.drawText(rect.adjusted(1, int(28 * self.scale_factor), 1, 0), 
-                        Qt.AlignmentFlag.AlignHCenter, self.title)
-        painter.setPen(self.text_color)
-        painter.drawText(rect.adjusted(0, int(25 * self.scale_factor), 0, 0), 
-                        Qt.AlignmentFlag.AlignHCenter, self.title)
+        # --- Teksty z automatycznym skalowaniem ---
+        
+        # Tytuł (górny tekst) - wyśrodkowany
+        title_rect = QRectF(
+            rect.x() + 10 * self.scale_factor,
+            rect.y() + 15 * self.scale_factor,
+            rect.width() - 20 * self.scale_factor,
+            40 * self.scale_factor
+        )
+        
+        # Cień tytułu
+        title_shadow_rect = title_rect.adjusted(1, 1, 1, 1)
+        self.draw_scaled_text(painter, title_shadow_rect, self.title, 
+                            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, 
+                            18, True, self.shadow_color)
+        
+        # Główny tytuł
+        self.draw_scaled_text(painter, title_rect, self.title, 
+                            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, 
+                            18, True, self.text_color)
 
-        # Tekst dolny
-        painter.setFont(QFont("Segoe UI", int(11 * self.scale_factor)))
-        painter.setPen(self.shadow_color)
-        painter.drawText(rect.adjusted(int(27 * self.scale_factor), int(72 * self.scale_factor), 2, 0), 
-                        Qt.AlignmentFlag.AlignLeft, self.left_text)
-        painter.drawText(rect.adjusted(-int(23 * self.scale_factor), int(72 * self.scale_factor), -int(18 * self.scale_factor), 0), 
-                        Qt.AlignmentFlag.AlignRight, self.right_text)
-        painter.setPen(self.text_color)
-        painter.drawText(rect.adjusted(int(25 * self.scale_factor), int(70 * self.scale_factor), 0, 0), 
-                        Qt.AlignmentFlag.AlignLeft, self.left_text)
-        painter.drawText(rect.adjusted(-int(25 * self.scale_factor), int(70 * self.scale_factor), -int(20 * self.scale_factor), 0), 
-                        Qt.AlignmentFlag.AlignRight, self.right_text)
+        # Tekst dolny - lewy i prawy
+        bottom_margin = 70 * self.scale_factor
+        bottom_height = 25 * self.scale_factor
+        
+        # Lewy tekst (60% szerokości)
+        left_text_rect = QRectF(
+            rect.x() + 15 * self.scale_factor,
+            rect.y() + bottom_margin,
+            rect.width() * 0.6 - 20 * self.scale_factor,
+            bottom_height
+        )
+        
+        # Prawy tekst (40% szerokości)  
+        right_text_rect = QRectF(
+            rect.x() + rect.width() * 0.6 + 5 * self.scale_factor,
+            rect.y() + bottom_margin,
+            rect.width() * 0.4 - 20 * self.scale_factor,
+            bottom_height
+        )
+
+        # Cienie dla dolnych tekstów
+        left_shadow_rect = left_text_rect.adjusted(1, 1, 1, 1)
+        right_shadow_rect = right_text_rect.adjusted(1, 1, 1, 1)
+        
+        self.draw_scaled_text(painter, left_shadow_rect, self.left_text, 
+                            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, 
+                            11, False, self.shadow_color)
+        self.draw_scaled_text(painter, right_shadow_rect, self.right_text, 
+                            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop, 
+                            11, False, self.shadow_color)
+
+        # Główne dolne teksty
+        self.draw_scaled_text(painter, left_text_rect, self.left_text, 
+                            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, 
+                            11, False, self.text_color)
+        self.draw_scaled_text(painter, right_text_rect, self.right_text, 
+                            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop, 
+                            11, False, self.text_color)
 
         # --- Uchwyt do resize w prawym dolnym rogu (TYLKO jeśli skalowanie włączone) ---
         if self.scaling_enabled:
@@ -580,59 +715,34 @@ class OverlayWidget(QWidget):
 
     def apply_settings_from_cache(self):
         """Stosuje ustawienia z cache bez wywoływania metod zmieniających flagi"""
-        # Wczytaj rozmiar i pozycję
-        saved_width = self._settings_cache.get("width", self.original_width)
-        saved_height = self._settings_cache.get("height", self.original_height)
-        
-        self.resize(saved_width, saved_height)
-        self.scale_factor = saved_width / self.original_width
-        
-        # Wczytaj ustawienia z cache BEZ wywoływania metod enable/disable
-        self.drag_enabled = self._settings_cache.get("drag_enabled", True)
-        self.scaling_enabled = self._settings_cache.get("scaling_enabled", False)
-        self.setWindowOpacity(self._settings_cache.get("opacity", 1.0))
-        
-        # Ustaw flagę clickthrough bez wywoływania metod
-        self._clickthrough_enabled = self._settings_cache.get("clickthrough", True)
-        
-        # Zastosuj stan clickthrough
-        self.apply_clickthrough_state()
-        
-        # Wczytaj pozycję
-        pos = self._settings_cache.get("position")
-        if pos and len(pos) == 2:
-            self.move(pos[0], pos[1])
-
-    def get_current_settings(self):
-        """Zwraca aktualne ustawienia z cache"""
-        return self._settings_cache.copy()
-
-    def update_settings(self, new_settings):
-        """Aktualizuje ustawienia w cache i zapisuje do pliku - TYLKO przekazane wartości"""
-        try:            
-            # AKTUALIZUJ TYLKO PRZEKAZANE KLUCZE - nie usuwaj istniejących
-            for key, value in new_settings.items():
-                # ZAPISZ WARTOŚĆ NAWET JEŚLI JEST None - to oznacza "brak wybranej grupy"
-                self._settings_cache[key] = value
+        try:
+            self._settings_mutex.lock()
             
-            # Użyj opóźnionego zapisu
-            self.request_save_settings()
-                            
-        except Exception as e:
-            print("Błąd aktualizacji ustawień:", e)
-
-    # ===== Aktualizacja UI =====
-    def update_ui_states(self):
-        """Aktualizuje UI w settings i tray dla wszystkich stanów"""
-        # Aktualizuj settings window
-        if hasattr(self, 'settings_window') and self.settings_window:
-            self.settings_window.clickthrough_checkbox.setChecked(self._clickthrough_enabled)
-            self.settings_window.drag_checkbox.setChecked(self.drag_enabled)
-            self.settings_window.scaling_checkbox.setChecked(self.scaling_enabled)
-        
-        # Aktualizuj tray
-        if hasattr(self, 'tray') and self.tray:
-            self.tray.update_all_states()
+            # Wczytaj rozmiar i pozycję
+            saved_width = self._settings_cache.get("width", self.original_width)
+            saved_height = self._settings_cache.get("height", self.original_height)
+            
+            self.resize(saved_width, saved_height)
+            self.scale_factor = saved_width / self.original_width
+            
+            # Wczytaj ustawienia z cache BEZ wywoływania metod enable/disable
+            self.drag_enabled = self._settings_cache.get("drag_enabled", True)
+            self.scaling_enabled = self._settings_cache.get("scaling_enabled", False)
+            self.setWindowOpacity(self._settings_cache.get("opacity", 1.0))
+            
+            # Ustaw flagę clickthrough bez wywoływania metod
+            self._clickthrough_enabled = self._settings_cache.get("clickthrough", True)
+            
+            # Zastosuj stan clickthrough
+            self.apply_clickthrough_state()
+            
+            # Wczytaj pozycję
+            pos = self._settings_cache.get("position")
+            if pos and len(pos) == 2:
+                self.move(pos[0], pos[1])
+                
+        finally:
+            self._settings_mutex.unlock()
 
     # ===== API =====
     def start_minute_updates(self):
@@ -643,8 +753,25 @@ class OverlayWidget(QWidget):
         # Timer dla płynnego odświeżania progress bara co 10 sekund (zamiast 5)
         self.progress_timer.start(10000)
         
+        # Sprawdź czy grupy są ustawione przed pierwszą aktualizacją
+        if not self.are_groups_set():
+            self.title = "Ustaw grupy w opcjach"
+            self.left_text = "Kliknij prawym przyciskiem"
+            self.right_text = "na ikonę w tray"
+            self.setProgress(0.0)
+            return
+            
         # Od razu wykonaj pierwszą aktualizację
         self.minute_update()
+
+    def are_groups_set(self):
+        """Sprawdza czy wszystkie wymagane grupy są ustawione"""
+        settings = self.get_current_settings()
+        group_c = settings.get("group_c")
+        group_l = settings.get("group_l")
+        group_k = settings.get("group_k")
+        
+        return group_c is not None and group_l is not None and group_k is not None
 
     def minute_update(self):
         """Aktualizuje wszystkie dane co minutę"""
@@ -654,20 +781,34 @@ class OverlayWidget(QWidget):
         try:
             self._api_update_in_progress = True
             
+            # SPRAWDŹ CZY GRUPY SĄ USTAWIONE
+            if not self.are_groups_set():
+                self.title = "Ustaw grupy w opcjach"
+                self.left_text = "Kliknij prawym przyciskiem"
+                self.right_text = "na ikonę w tray"
+                self.setProgress(0.0)
+                return
+            
             # UŻYJ USTAWIEN Z CACHE zamiast wczytywać z pliku        
-            currentLesson = api2.get_current_segment() or {
-                "syllabus": "Brak zajęć", 
-                "remaining_time": 0, 
-                "total_duration": 0, 
-                "is_break": False, 
-                "time_elapsed": 0
-            }
+            currentLesson = api.get_current_segment()
+            if not currentLesson or not isinstance(currentLesson, dict):
+                currentLesson = {
+                    "syllabus": "Brak zajęć", 
+                    "remaining_time": 0, 
+                    "total_duration": 0, 
+                    "is_break": False, 
+                    "time_elapsed": 0,
+                    "start": "00:00",
+                    "end": "00:00"
+                }
             
             # Pobierz następną lekcję
-            nextLesson = api2.get_next_segment() or {
-                "syllabus": "Brak dalszych zajęć",
-                "hall": "-",
-            }
+            nextLesson = api.get_next_segment()
+            if not nextLesson or not isinstance(nextLesson, dict):
+                nextLesson = {
+                    "syllabus": "Brak dalszych zajęć",
+                    "hall": "-",
+                }
 
             self.title = currentLesson.get("syllabus", "Brak zajęć")
             
@@ -680,6 +821,22 @@ class OverlayWidget(QWidget):
             
         except Exception as e:
             print("Błąd podczas aktualizacji danych:", e)
+            # Ustaw domyślne wartości w przypadku błędu
+            self.currentLesson = {
+                "syllabus": "Błąd ładowania", 
+                "remaining_time": 0, 
+                "total_duration": 0, 
+                "is_break": False, 
+                "time_elapsed": 0,
+                "start": "00:00",
+                "end": "00:00"
+            }
+            self.nextLesson = {
+                "syllabus": "Brak danych",
+                "hall": "-",
+            }
+            self.title = "Błąd ładowania"
+            self.setProgress(0.0)
         finally:
             self._api_update_in_progress = False
 
@@ -695,12 +852,19 @@ class OverlayWidget(QWidget):
             
         try:
             # Pobierz czasy z aktualnej lekcji
-            start_time_str = self.currentLesson.get("start")
-            end_time_str = self.currentLesson.get("end")
-            
+            if self.currentLesson.get("id") == -1:
+                start_time_str = self.currentLesson.get("exactStart")
+                end_time_str = self.currentLesson.get("exactEnd")
+            else:
+                start_time_str = self.currentLesson.get("start")
+                end_time_str = self.currentLesson.get("end")
+
             if not start_time_str or not end_time_str:
                 self.setProgress(0.0)
                 return
+            
+            if end_time_str == "00:00":
+                end_time_str = self.nextLesson.get("start", "00:00")
                 
             # Pobierz aktualną datę
             today = datetime.now().date()
@@ -711,6 +875,7 @@ class OverlayWidget(QWidget):
             
             current_time = datetime.now()
             
+            print(current_time, start_datetime, end_datetime)
             # Jeśli lekcja kończy się po północy, dodaj jeden dzień do czasu zakończenia
             if end_datetime < start_datetime:
                 end_datetime = end_datetime.replace(day=end_datetime.day + 1)
@@ -728,12 +893,25 @@ class OverlayWidget(QWidget):
                 progress = min(max(elapsed_time / total_duration, 0.0), 1.0)
             else:
                 progress = 0.0
-                
+
             self.setProgress(progress)
             
         except Exception as e:
             print(f"Błąd podczas aktualizacji postępu: {e}")
             self.setProgress(0.0)
+
+    # ===== Aktualizacja UI =====
+    def update_ui_states(self):
+        """Aktualizuje UI w settings i tray dla wszystkich stanów"""
+        # Aktualizuj settings window
+        if hasattr(self, 'settings_window') and self.settings_window:
+            self.settings_window.clickthrough_checkbox.setChecked(self._clickthrough_enabled)
+            self.settings_window.drag_checkbox.setChecked(self.drag_enabled)
+            self.settings_window.scaling_checkbox.setChecked(self.scaling_enabled)
+        
+        # Aktualizuj tray
+        if hasattr(self, 'tray') and self.tray:
+            self.tray.update_all_states()
 
     # ===== Zamknięcie programu =====
     def confirm_close(self):

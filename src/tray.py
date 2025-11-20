@@ -22,7 +22,7 @@ class Tray:
                 return os.path.join(sys._MEIPASS, relative_path)
             return os.path.join(os.path.abspath("."), relative_path)
 
-        icon_path = resource_path("images/ikona.ico")
+        icon_path = resource_path("images/ikona.png")
 
         # Tworzymy ikonę tray
         self.tray_icon = QSystemTrayIcon(QIcon(icon_path), self.app)

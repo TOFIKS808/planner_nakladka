@@ -1,84 +1,22 @@
 import os
 import json
+import socket
+import threading
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QSlider, QCheckBox, QPushButton,
     QSpacerItem, QSizePolicy, QHBoxLayout, QButtonGroup, QRadioButton, QMessageBox
 )
-from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, pyqtProperty
-from PyQt6.QtGui import QPainter, QLinearGradient, QColor, QFont
-
-
-class FancyCloseButton(QPushButton):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedSize(30, 30)
-        self.setText("×")
-        self._opacity = 1.0
-        
-        # Animacja
-        self.animation = QPropertyAnimation(self, b"opacity")
-        self.animation.setDuration(200)
-        self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        
-    def get_opacity(self):
-        return self._opacity
-        
-    def set_opacity(self, value):
-        self._opacity = value
-        self.update()
-        
-    opacity = pyqtProperty(float, get_opacity, set_opacity)
-    
-    def enterEvent(self, event):
-        self.animation.setStartValue(self._opacity)
-        self.animation.setEndValue(0.8)
-        self.animation.start()
-        super().enterEvent(event)
-        
-    def leaveEvent(self, event):
-        self.animation.setStartValue(self._opacity)
-        self.animation.setEndValue(1.0)
-        self.animation.start()
-        super().leaveEvent(event)
-        
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        # Tło z gradientem przy najechaniu - NOWA PALETA
-        if self.underMouse():
-            gradient = QLinearGradient(0, 0, 0, self.height())
-            gradient.setColorAt(0.0, QColor(220, 80, 80))  # Czerwony
-            gradient.setColorAt(1.0, QColor(180, 50, 50))  # Ciemniejszy czerwony
-            painter.setBrush(gradient)
-        else:
-            painter.setBrush(QColor(0, 0, 0, 0))
-            
-        painter.setPen(Qt.PenStyle.NoPen)
-        
-        # Zaokrąglony prostokąt
-        rect = self.rect()
-        painter.drawRoundedRect(rect, 8, 8)
-        
-        # Efekt przezroczystości
-        painter.setOpacity(self._opacity)
-        
-        # Tekst (X) - perfekcyjnie wyśrodkowany
-        painter.setPen(QColor(255, 255, 255))
-        font = QFont("Segoe UI")
-        font.setPointSize(16)
-        font.setBold(True)
-        painter.setFont(font)
-        
-        # Ręczne wyśrodkowanie tekstu
-        text_rect = rect.adjusted(0, -3, 0, 0)  # Korekta manualna
-        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, self.text())
-
+from PyQt6.QtCore import Qt, pyqtSignal, QObject
+from .ui_components import FancyCloseButton
+from .styles import (
+    get_slider_style, get_checkbox_style, get_button_style, get_radio_button_style
+)
 
 class SettingsWindow(QWidget):
     def __init__(self, overlay=None, parent=None):
         super().__init__(parent)
         self.overlay = overlay
+        
         self.setWindowTitle("⚙️ Ustawienia nakładki")
         self.setFixedWidth(420)
         
@@ -176,25 +114,26 @@ class SettingsWindow(QWidget):
         self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.opacity_slider.setRange(10, 100)
         self.opacity_slider.setValue(100)
-        self.opacity_slider.valueChanged.connect(self.on_opacity_change)
-        self.opacity_slider.setStyleSheet(self._slider_style())
+        self.opacity_slider.valueChanged.connect(self.preview_opacity)
+        self.opacity_slider.sliderReleased.connect(self.save_opacity)
+        self.opacity_slider.setStyleSheet(get_slider_style())
         layout.addWidget(self.opacity_slider)
 
         # ====== Skalowanie ======
         self.scaling_checkbox = QCheckBox("Włącz skalowanie nakładki (przeciągnij za róg aby skalować)")
-        self.scaling_checkbox.setStyleSheet(self._checkbox_style())
+        self.scaling_checkbox.setStyleSheet(get_checkbox_style())
         self.scaling_checkbox.stateChanged.connect(self.on_scaling_change)
         layout.addWidget(self.scaling_checkbox)
 
         # ====== Click-through ======
         self.clickthrough_checkbox = QCheckBox("Pozwól klikać przez nakładkę")
-        self.clickthrough_checkbox.setStyleSheet(self._checkbox_style())
+        self.clickthrough_checkbox.setStyleSheet(get_checkbox_style())
         self.clickthrough_checkbox.stateChanged.connect(self.on_clickthrough_change)
         layout.addWidget(self.clickthrough_checkbox)
 
         # ====== Dragging ======
         self.drag_checkbox = QCheckBox("Pozwól przenosić nakładkę")
-        self.drag_checkbox.setStyleSheet(self._checkbox_style())
+        self.drag_checkbox.setStyleSheet(get_checkbox_style())
         self.drag_checkbox.stateChanged.connect(self.on_drag_change)
         layout.addWidget(self.drag_checkbox)
 
@@ -245,13 +184,13 @@ class SettingsWindow(QWidget):
 
         save_button = QPushButton("💾 Zapisz ustawienia")
         save_button.clicked.connect(self.save_settings)
-        save_button.setStyleSheet(self._button_style("green"))
+        save_button.setStyleSheet(get_button_style("green"))
         layout.addWidget(save_button, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Przycisk zamknięcia programu
         close_button = QPushButton("❌ Zamknij program")
         close_button.clicked.connect(self.confirm_close_app)
-        close_button.setStyleSheet(self._button_style("red"))
+        close_button.setStyleSheet(get_button_style("red"))
         layout.addWidget(close_button, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Dodajemy wszystko do głównego layoutu
@@ -264,109 +203,6 @@ class SettingsWindow(QWidget):
 
         self.load_settings()
 
-    def _slider_style(self):
-        return """
-        QSlider::groove:horizontal { 
-            height: 8px; 
-            background: rgba(45, 55, 75, 180); 
-            border-radius: 4px; 
-        }
-        QSlider::handle:horizontal { 
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 rgb(74, 144, 226), 
-                stop:1 rgb(103, 230, 220));
-            border: 2px solid white; 
-            width: 16px; 
-            height: 16px; 
-            margin: -4px 0; 
-            border-radius: 8px; 
-        }
-        QSlider::sub-page:horizontal { 
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 rgb(74, 144, 226), 
-                stop:1 rgb(103, 230, 220));
-            border-radius: 4px; 
-        }
-        QSlider::add-page:horizontal { 
-            background: rgba(85, 95, 115, 150); 
-            border-radius: 4px; 
-        }
-        """
-
-    def _checkbox_style(self):
-        return """
-        QCheckBox { 
-            color: rgb(240, 244, 255); 
-            font-size: 13px; 
-            font-family: "Segoe UI";
-            spacing: 8px; 
-            background: transparent;
-        }
-        QCheckBox::indicator { 
-            width: 18px; 
-            height: 18px; 
-            border-radius: 4px; 
-            border: 2px solid rgba(74, 144, 226, 200); 
-            background-color: transparent; 
-        }
-        QCheckBox::indicator:checked { 
-            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 rgba(74, 144, 226, 255), 
-                stop:1 rgba(103, 230, 220, 255));
-            border: 2px solid rgba(60, 130, 200, 255); 
-        }
-        QCheckBox:hover {
-            color: rgba(103, 230, 220, 255);
-        }
-        """
-
-    def _button_style(self, color_type):
-        base_style = """
-            QPushButton { 
-                color: white; 
-                border: none; 
-                padding: 10px 20px;
-                border-radius: 8px; 
-                font-size: 13px; 
-                font-family: "Segoe UI";
-                font-weight: bold;
-                min-width: 160px;
-            }
-            QPushButton:hover { 
-                transform: none;
-            }
-            QPushButton:pressed { 
-                padding: 11px 19px 9px 21px;
-            }
-        """
-        
-        if color_type == "green":
-            return base_style + """
-                QPushButton { 
-                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                        stop:0 rgba(74, 179, 113, 220), 
-                        stop:1 rgba(46, 139, 87, 220));
-                }
-                QPushButton:hover { 
-                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                        stop:0 rgba(84, 199, 123, 220), 
-                        stop:1 rgba(56, 159, 97, 220));
-                }
-            """
-        else:  # red
-            return base_style + """
-                QPushButton { 
-                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                        stop:0 rgba(220, 80, 80, 220), 
-                        stop:1 rgba(180, 50, 50, 220));
-                }
-                QPushButton:hover { 
-                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                        stop:0 rgba(240, 90, 90, 220), 
-                        stop:1 rgba(200, 60, 60, 220));
-                }
-            """
-
     # ========================== GRUPY ==========================
     def create_group(self, labels, layout):
         group = QButtonGroup(self)
@@ -376,31 +212,7 @@ class SettingsWindow(QWidget):
         row.addStretch()
         for text in labels:
             btn = QRadioButton(text)
-            btn.setStyleSheet("""
-                QRadioButton { 
-                    color: rgb(240, 244, 255); 
-                    font-size: 13px; 
-                    font-family: "Segoe UI";
-                    spacing: 8px; 
-                    background: transparent;
-                }
-                QRadioButton::indicator { 
-                    width: 18px; 
-                    height: 18px;
-                    border-radius: 9px; 
-                    border: 2px solid rgba(74, 144, 226, 200); 
-                    background-color: transparent; 
-                }
-                QRadioButton::indicator:checked { 
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                        stop:0 rgba(74, 144, 226, 255), 
-                        stop:1 rgba(103, 230, 220, 255));
-                    border: 2px solid rgba(60, 130, 200, 255); 
-                }
-                QRadioButton:hover {
-                    color: rgba(103, 230, 220, 255);
-                }
-            """)
+            btn.setStyleSheet(get_radio_button_style())
             group.addButton(btn)
             row.addWidget(btn)
         row.addStretch()
@@ -427,18 +239,21 @@ class SettingsWindow(QWidget):
             self.drag_position = None
             event.accept()
 
-    # ========================== HANDLERY ==========================
-    def on_group_changed(self, button):
-        """Automatycznie zapisuj gdy zmieniona zostanie grupa"""
-        self.save_settings()
-
-    def on_opacity_change(self, value):
+    def preview_opacity(self, value):
+        """Tylko zmienia wygląd, nie zapisuje (dla wydajności)"""
         if self.overlay:
             try:
                 self.overlay.setWindowOpacity(value / 100.0)
-                self.save_settings()
             except Exception as e:
                 print("Błąd przy zmianie przezroczystości:", e)
+
+    def save_opacity(self):
+        """Zapisuje ustawienia po zakończeniu przesuwania suwaka"""
+        self.save_settings()
+
+    def on_group_changed(self, button):
+        """Automatycznie zapisuj gdy zmieniona zostanie grupa"""
+        self.save_settings()
 
     def on_scaling_change(self, state):
         if self.overlay:
@@ -461,13 +276,18 @@ class SettingsWindow(QWidget):
 
     # ========================== USTAWIENIA ==========================
     def load_settings(self):
-        """Wczytuje ustawienia z overlay (jeden wspólny system)"""
+        """Wczytuje ustawienia"""
         try:
-            if not self.overlay:
-                return
-
-            # Pobierz ustawienia z overlay
-            data = self.overlay.get_current_settings()
+            # W trybie embedded pobierz z overlay
+            if self.overlay:
+                data = self.overlay.get_current_settings()
+            else:
+                # Fallback to file if overlay not available (shouldn't happen in embedded)
+                if os.path.exists(self.config_path):
+                    with open(self.config_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                else:
+                    data = {}
 
             # Ustawienia podstawowe
             opacity = data.get("opacity", 1.0)
@@ -512,15 +332,9 @@ class SettingsWindow(QWidget):
         return checked.text() if checked else None
 
     def save_settings(self):
-        """Zapisuje ustawienia przez overlay (jeden wspólny system)"""
+        """Zapisuje ustawienia"""
         try:
-            if not self.overlay:
-                return
-                
-            # Pobierz aktualne ustawienia z overlay
-            current_settings = self.overlay.get_current_settings()
-                
-            # Przygotuj ustawienia do zapisu - ZACHOWAJ ISTNIEJĄCE GRUPY JEŚLI NOWE SĄ None
+            # Przygotuj ustawienia do zapisu
             settings_to_save = {
                 "opacity": round(self.opacity_slider.value() / 100.0, 2),
                 "clickthrough": self.clickthrough_checkbox.isChecked(),
@@ -540,11 +354,10 @@ class SettingsWindow(QWidget):
             if group_k is not None:
                 settings_to_save["group_k"] = group_k
 
-            # Użyj metody z overlay do zapisu
-            self.overlay.update_settings(settings_to_save)
-            
-            # Wymuś natychmiastowy zapis
-            self.overlay.save_settings_immediately()
+            if self.overlay:
+                # W trybie embedded użyj starej metody
+                self.overlay.update_settings(settings_to_save)
+                self.overlay.settings_manager.request_save_settings()
 
         except Exception as e:
             print(f"Błąd zapisywania ustawień: {e}")
@@ -560,22 +373,26 @@ class SettingsWindow(QWidget):
         )
         if reply == QMessageBox.StandardButton.Yes:
             self.save_settings()
-            # Zamykamy całą aplikację
+            
             if self.overlay:
                 if hasattr(self.overlay, 'close'):
                     self.overlay.close()
                 elif hasattr(self.overlay, 'quit'):
                     self.overlay.quit()
-            # Zamykamy również okno ustawień
-            self.close()
+                self.close()
 
     def close_settings(self):
-        """Zamyka tylko okno ustawień (jak kliknięcie zębatki)"""
+        """Zamyka tylko okno ustawień"""
         self.hide()
         if self.overlay and hasattr(self.overlay, '_clickthrough_enabled') and self.overlay._clickthrough_enabled:
             self.overlay.enable_clickthrough()
 
+    def showEvent(self, event):
+        """Przeładowuje ustawienia przy każdym otwarciu okna"""
+        self.load_settings()
+        super().showEvent(event)
+
     def closeEvent(self, event):
-        """Przechwytuje zdarzenie zamknięcia okna - teraz zamyka tylko okno ustawień"""
+        """Przechwytuje zdarzenie zamknięcia okna"""
         self.close_settings()
         event.accept()

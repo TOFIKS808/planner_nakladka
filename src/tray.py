@@ -30,6 +30,7 @@ class Tray:
 
         # Budujemy menu
         self.menu = QMenu()
+        self.menu.aboutToShow.connect(self.update_all_states)
 
         # Akcje menu
         self.toggle_action = QAction("Pokaż / Ukryj overlay")

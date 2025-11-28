@@ -1,4 +1,4 @@
 PyQt6
 keyboard
 requests
-PILLOW
+psutil

@@ -3,18 +3,35 @@ import os
 import json
 from datetime import datetime
 
+# Global session for connection pooling
+session = requests.Session()
+
 def fetch_timetable(settings=None):
     try:
         if settings is None:
-                settings = load_settings()
+            settings = load_settings()
         
-        if settings["group_c"] is not None or settings["group_l"] != " ": group_c = settings["group_c"][-1]
-        else: group_c = 1
-        if settings["group_k"] is not None or settings["group_l"] != " ": group_k = settings["group_k"][-1]
-        else: group_k = 1
-        if settings["group_l"] is not None or settings["group_l"] != " ": group_l = settings["group_l"][-1]
-        else: group_l = 1
-        response = requests.get()
+        # Pobierz grupy z ustawień, używając .get() dla bezpieczeństwa
+        group_c_val = settings.get("group_c")
+        group_l_val = settings.get("group_l")
+        group_k_val = settings.get("group_k")
+
+        # Sprawdź czy grupy są ustawione (nie None)
+        if not group_c_val or not group_l_val or not group_k_val:
+            # print("Brak ustawionych grup") # Debug
+            return None
+
+        # Pobierz ostatni znak (zakładając format np. "11K1" -> "1")
+        try:
+            group_c = group_c_val[-1]
+            group_k = group_k_val[-1]
+            group_l = group_l_val[-1]
+        except IndexError:
+            print("Błąd formatu grupy")
+            return None
+        
+        # Use the global session
+        response = session.get(f"https://planzajecpk.app/api2/timetable/{group_c}?day=auto&lab={group_l}&klab={group_k}&week=auto&merge=true&fill=true&changes=true")
         response.raise_for_status()
         return response.json()
     except requests.RequestException as e:
@@ -25,6 +42,7 @@ def get_current_segment(timetable=None):
     if timetable is None:
         timetable = fetch_timetable()
 
+    if timetable:
         for lesson in timetable:
             start_time = datetime.strptime(lesson['start'], "%H:%M").time()
             end_time = datetime.strptime(lesson['end'], "%H:%M").time()
@@ -36,11 +54,12 @@ def get_next_segment(timetable=None):
     if timetable is None:
         timetable = fetch_timetable()
 
-    now = datetime.now().time()
-    for lesson in timetable:
-        start_time = datetime.strptime(lesson['start'], "%H:%M").time()
-        if now < start_time:
-            return lesson
+    if timetable:
+        now = datetime.now().time()
+        for lesson in timetable:
+            start_time = datetime.strptime(lesson['start'], "%H:%M").time()
+            if now < start_time:
+                return lesson
 
 def load_settings():
     try:

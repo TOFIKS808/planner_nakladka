@@ -1,4 +1,4 @@
-from src import overlay
+from src.overlay import OverlayWidget
 from src.tray import Tray
 
 from PyQt6.QtWidgets import QApplication
@@ -7,18 +7,14 @@ import sys
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
-    overlay_widget = overlay.OverlayWidget(
+    overlay_widget = OverlayWidget(
         title="Lekcja",
-        left_text="czas \u2192 następna",
+        left_text="czas → następna",
         right_text="sala",
         progress=0.0
     )
 
     overlay_widget.show()
-
-    # Najpierw tray, POTEM aktualizacje
-    tray = Tray(app, overlay_widget)
-    overlay_widget.tray_reference = tray
 
     # Uruchom aktualizacje (upewnij się, że te metody istnieją!)
     if hasattr(overlay_widget, "start_minute_updates"):

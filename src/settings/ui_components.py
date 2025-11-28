@@ -2,7 +2,7 @@
 Komponenty UI dla okna ustawień
 """
 from PyQt6.QtWidgets import QPushButton
-from PyQt6.QtCore import QPropertyAnimation, QEasingCurve, pyqtProperty
+from PyQt6.QtCore import QPropertyAnimation, QEasingCurve, pyqtProperty, Qt
 from PyQt6.QtGui import QPainter, QLinearGradient, QColor
 
 
@@ -13,6 +13,7 @@ class FancyCloseButton(QPushButton):
         super().__init__(parent)
         self.setFixedSize(30, 30)
         self.setText("×")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._opacity = 1.0
         
         # Animacja

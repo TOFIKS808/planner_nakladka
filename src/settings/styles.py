@@ -6,6 +6,9 @@ Style CSS dla elementów UI okna ustawień
 def get_slider_style():
     """Zwraca styl CSS dla suwaków"""
     return """
+        QSlider {
+            background: transparent;
+        }
         QSlider::groove:horizontal {
             border: none;
             height: 6px;
@@ -40,6 +43,7 @@ def get_checkbox_style():
             spacing: 8px;
             color: #e0e8f0;
             font-size: 13px;
+            background: transparent;
         }
         QCheckBox::indicator {
             width: 18px;
@@ -113,6 +117,7 @@ def get_radio_button_style():
             color: #e0e8f0;
             font-size: 12px;
             padding: 4px;
+            background: transparent;
         }
         QRadioButton::indicator {
             width: 16px;

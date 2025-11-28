@@ -117,23 +117,27 @@ class SettingsWindow(QWidget):
         self.opacity_slider.valueChanged.connect(self.preview_opacity)
         self.opacity_slider.sliderReleased.connect(self.save_opacity)
         self.opacity_slider.setStyleSheet(get_slider_style())
+        self.opacity_slider.setCursor(Qt.CursorShape.PointingHandCursor)
         layout.addWidget(self.opacity_slider)
 
         # ====== Skalowanie ======
         self.scaling_checkbox = QCheckBox("Włącz skalowanie nakładki (przeciągnij za róg aby skalować)")
         self.scaling_checkbox.setStyleSheet(get_checkbox_style())
+        self.scaling_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         self.scaling_checkbox.stateChanged.connect(self.on_scaling_change)
         layout.addWidget(self.scaling_checkbox)
 
         # ====== Click-through ======
         self.clickthrough_checkbox = QCheckBox("Pozwól klikać przez nakładkę")
         self.clickthrough_checkbox.setStyleSheet(get_checkbox_style())
+        self.clickthrough_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         self.clickthrough_checkbox.stateChanged.connect(self.on_clickthrough_change)
         layout.addWidget(self.clickthrough_checkbox)
 
         # ====== Dragging ======
         self.drag_checkbox = QCheckBox("Pozwól przenosić nakładkę")
         self.drag_checkbox.setStyleSheet(get_checkbox_style())
+        self.drag_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         self.drag_checkbox.stateChanged.connect(self.on_drag_change)
         layout.addWidget(self.drag_checkbox)
 
@@ -184,12 +188,14 @@ class SettingsWindow(QWidget):
 
         save_button = QPushButton("💾 Zapisz ustawienia")
         save_button.clicked.connect(self.save_settings)
+        save_button.setCursor(Qt.CursorShape.PointingHandCursor)
         save_button.setStyleSheet(get_button_style("green"))
         layout.addWidget(save_button, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Przycisk zamknięcia programu
         close_button = QPushButton("❌ Zamknij program")
         close_button.clicked.connect(self.confirm_close_app)
+        close_button.setCursor(Qt.CursorShape.PointingHandCursor)
         close_button.setStyleSheet(get_button_style("red"))
         layout.addWidget(close_button, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -213,6 +219,7 @@ class SettingsWindow(QWidget):
         for text in labels:
             btn = QRadioButton(text)
             btn.setStyleSheet(get_radio_button_style())
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
             group.addButton(btn)
             row.addWidget(btn)
         row.addStretch()

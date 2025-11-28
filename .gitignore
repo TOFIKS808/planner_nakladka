@@ -120,3 +120,5 @@ desktop.ini
 # Local test data or secrets
 /secrets.json
 *.sqlite3
+
+todo.md

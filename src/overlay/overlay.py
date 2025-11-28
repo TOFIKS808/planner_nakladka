@@ -98,6 +98,9 @@ class OverlayWidget(QWidget):
         keyboard.add_hotkey("ctrl+q", self.toggle_overlay)
 
         keyboard.add_hotkey("ctrl+q", self.toggle_overlay)
+        
+        # Enable mouse tracking for hover events
+        self.setMouseTracking(True)
 
     def open_settings(self):
         """Otwiera okno ustawień"""

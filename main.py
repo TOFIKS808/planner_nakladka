@@ -1,10 +1,12 @@
 from src.overlay import OverlayWidget
 from src.tray import Tray
 
-from PyQt6.QtWidgets import QApplication
+import multiprocessing
 import sys
+from PyQt6.QtWidgets import QApplication
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     app = QApplication(sys.argv)
 
     overlay_widget = OverlayWidget(

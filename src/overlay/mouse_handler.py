@@ -45,6 +45,8 @@ class MouseHandler:
                 self.widget.setCursor(Qt.CursorShape.SizeBDiagCursor)  # Backslash diagonal for bottom-left
                 if self.widget._clickthrough_enabled:
                     self.widget.disable_clickthrough()
+            elif self.widget.drag_enabled:
+                 self.widget.setCursor(Qt.CursorShape.SizeAllCursor)
             else:
                 self.widget.setCursor(Qt.CursorShape.ArrowCursor)
                 # PRZYWRÓĆ CLICKTHROUGH GDY KURSOR OPUSZCZA OBSZAR INTERAKTYWNY
@@ -89,14 +91,29 @@ class MouseHandler:
     
     def handle_mouse_move(self, event):
         """Obsługuje ruch myszy"""
+        # Sprawdź kursor jeśli nie ma aktywnej akcji
+        if not self._resize_active and not self._drag_active:
+            self.check_cursor_position()
+            
         # Obsługa resize (TYLKO jeśli skalowanie włączone)
         if self._resize_active and self.widget.scaling_enabled:
             delta = event.globalPosition().toPoint() - self._resize_start_pos
             
             if self._resize_corner == "bottom_left":
-                # Moving left (negative delta x) increases width
-                # Moving right (positive delta x) decreases width
-                new_width = max(self.widget.minimumWidth(), self._resize_start_size.width() - delta.x())
+                # Calculate potential width change from X movement (Left = Grow)
+                width_change_from_x = -delta.x()
+                
+                # Calculate potential width change from Y movement (Down = Grow)
+                # Width change = Height change * aspect_ratio
+                width_change_from_y = delta.y() * self._aspect_ratio
+                
+                # Use the one with larger magnitude to drive the resize for better responsiveness
+                if abs(width_change_from_x) > abs(width_change_from_y):
+                    change = width_change_from_x
+                else:
+                    change = width_change_from_y
+                
+                new_width = max(self.widget.minimumWidth(), self._resize_start_size.width() + int(change))
                 
                 # Use captured aspect ratio
                 new_height = int(new_width / self._aspect_ratio)

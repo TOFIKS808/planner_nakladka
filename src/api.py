@@ -31,7 +31,7 @@ def fetch_timetable(settings=None):
             return None
         
         # Use the global session
-        response = session.get(f"https://planzajecpk.app/api2/timetable/{group_c}?day=auto&lab={group_l}&klab={group_k}&week=auto&merge=true&fill=true&changes=true")
+        response = session.get()
         response.raise_for_status()
         return response.json()
     except requests.RequestException as e:

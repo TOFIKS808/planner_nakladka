@@ -69,8 +69,6 @@ class OverlayWidget(QWidget):
         # Initialize UI components BEFORE resizing
         self._setup_ui_layout()
         
-        self.load_settings() # Wczytaj ustawienia i zastosuj rozmiar/pozycję
-
         # Okno
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)  # Prevent system background painting
@@ -79,6 +77,8 @@ class OverlayWidget(QWidget):
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
         )
+
+        self.load_settings() # Wczytaj ustawienia i zastosuj rozmiar/pozycję
 
         # Animacje
         self.anim = QPropertyAnimation(self, b"progress")
@@ -633,11 +633,18 @@ class OverlayWidget(QWidget):
     # ===== Aktualizacja UI =====
     def update_ui_states(self):
         """Aktualizuje UI w settings i tray dla wszystkich stanów"""
-        # Aktualizuj settings window
+        # Aktualizuj settings window (z blokadą sygnałów aby zapobiec pętlom)
         if hasattr(self, 'settings_window') and self.settings_window:
-            self.settings_window.clickthrough_checkbox.setChecked(self._clickthrough_enabled)
-            self.settings_window.drag_checkbox.setChecked(self.drag_enabled)
-            self.settings_window.scaling_checkbox.setChecked(self.scaling_enabled)
+            sw = self.settings_window
+            sw.clickthrough_checkbox.blockSignals(True)
+            sw.drag_checkbox.blockSignals(True)
+            sw.scaling_checkbox.blockSignals(True)
+            sw.clickthrough_checkbox.setChecked(self._clickthrough_enabled)
+            sw.drag_checkbox.setChecked(self.drag_enabled)
+            sw.scaling_checkbox.setChecked(self.scaling_enabled)
+            sw.clickthrough_checkbox.blockSignals(False)
+            sw.drag_checkbox.blockSignals(False)
+            sw.scaling_checkbox.blockSignals(False)
         
         # Aktualizuj tray
         if hasattr(self, 'tray') and self.tray:

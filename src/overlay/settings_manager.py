@@ -19,6 +19,9 @@ class SettingsManager:
         self._save_timer = QTimer()
         self._save_timer.setSingleShot(True)
         self._save_timer.timeout.connect(self._delayed_save_settings)
+        
+        # Wczytaj ustawienia od razu przy tworzeniu menedżera
+        self.load_settings()
     
     def load_settings(self):
         """Wczytuje ustawienia z pliku do cache"""
@@ -51,6 +54,7 @@ class SettingsManager:
             "group_c": None,
             "group_l": None,
             "group_k": None,
+            "hidden_subjects": [],
             "scale": 1.0,
             "position": [100, 100],
             "width": 420,
@@ -81,14 +85,20 @@ class SettingsManager:
             
             # AKTUALIZUJ TYLKO PRZEKAZANE KLUCZE - nie usuwaj istniejących
             for key, value in new_settings.items():
+                if key == "force_clear_hidden":
+                    continue
                 # ZACHOWAJ ISTNIEJĄCE WARTOŚCI GRUP JEŚLI NOWA WARTOŚĆ JEST None
                 if key in ["group_c", "group_l", "group_k"] and value is None:
                     current_value = self._settings_cache.get(key)
                     if current_value is not None:
-                        # Zachowaj istniejącą wartość, nie nadpisuj na None
                         continue
                 
-                # ZAPISZ WARTOŚĆ DLA WSZYSTKICH INNYCH PRZYPADKÓW
+                # ZACHOWAJ UKRYTE PRZEDMIOTY JEŚLI NOWA WARTOŚĆ JEST PUSTA A CACHE MA DANE
+                if key == "hidden_subjects" and not value:
+                    current_value = self._settings_cache.get("hidden_subjects")
+                    if current_value and not new_settings.get("force_clear_hidden", False):
+                        continue
+
                 self._settings_cache[key] = value
             
             # Użyj opóźnionego zapisu

@@ -1,6 +1,7 @@
 import requests
 import os
 import json
+import urllib.parse
 from datetime import datetime
 
 # Global session for connection pooling
@@ -15,6 +16,7 @@ def fetch_timetable(settings=None):
         group_c_val = settings.get("group_c")
         group_l_val = settings.get("group_l")
         group_k_val = settings.get("group_k")
+        hidden_subjects = settings.get("hidden_subjects", [])
 
         # Sprawdź czy grupy są ustawione (nie None)
         if not group_c_val or not group_l_val or not group_k_val:
@@ -23,17 +25,59 @@ def fetch_timetable(settings=None):
 
         # Pobierz ostatni znak (zakładając format np. "11K1" -> "1")
         try:
-            group_c = group_c_val[-1]
-            group_k = group_k_val[-1]
-            group_l = group_l_val[-1]
+            group_c = group_c_val
+            group_k = group_k_val
+            group_l = group_l_val
         except IndexError:
             print("Błąd formatu grupy")
             return None
         
         # Use the global session
-        response = session.get()
+        roman = {1:'I', 2:'II', 3:'III', 4:'IV', 5:'V', 6:'VI', 7:'VII', 8:'VIII', 9:'IX', 10:'X', 11:'XI', 12:'XII'}
+        now = datetime.now()
+        day_str = f"{now.day:02d} {roman[now.month]}"
+        
+        url = f"https://pk-timetable-scraper-api-orpin.vercel.app/api2/timetable/{group_c}?day={day_str}&lab={group_l}&klab={group_k}&week=auto&merge=true&fill=true&changes=true"
+        if hidden_subjects:
+            url += f"&hide={urllib.parse.quote(json.dumps(hidden_subjects))}"
+
+        response = session.get(url)
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+
+        # Dodatkowa ochrona po stronie klienta:
+        if data and hidden_subjects:
+            clean_hidden = [str(h).strip().lower() for h in hidden_subjects if str(h).strip()]
+            filtered = []
+            days_pl = ['pon', 'wt', 'śr', 'czw', 'pt', 'sob', 'nie']
+            today_day = days_pl[now.weekday()]
+            for item in data:
+                name = (item.get("name") or "").strip().lower()
+                syll = (item.get("syllabus") or "").strip().lower()
+                start = (item.get("start") or "").strip().lower()
+                clean_start = start.lstrip('0')
+                if item.get("is_break") or "okienko" in name or "okienko" in syll:
+                    filtered.append(item)
+                    continue
+                is_hidden = False
+                for h in clean_hidden:
+                    if '(' not in h:
+                        if h == name or h in name or h == syll or h in syll:
+                            is_hidden = True
+                            break
+                    else:
+                        subj_part = h.split('(')[0].strip()
+                        if subj_part and (subj_part in name or subj_part in syll):
+                            day_match = (today_day in h) if any(d in h for d in days_pl) else True
+                            time_match = start and (start in h or (clean_start and clean_start in h))
+                            if day_match and time_match:
+                                is_hidden = True
+                                break
+                if not is_hidden:
+                    filtered.append(item)
+            data = filtered
+
+        return data
     except requests.RequestException as e:
         print(f"Error fetching timetable data: {e}")
         return None

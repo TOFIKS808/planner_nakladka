@@ -1,142 +1,103 @@
 """
-Style CSS dla elementów UI okna ustawień
+Style CSS dla elementów UI okna ustawień (Zielony / Szmaragdowy motyw nakładki)
 """
 
-
 def get_slider_style():
-    """Zwraca styl CSS dla suwaków"""
     return """
         QSlider {
             background: transparent;
         }
         QSlider::groove:horizontal {
             border: none;
-            height: 6px;
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 #3a4a5a, stop:1 #2a3a4a);
-            border-radius: 3px;
+            height: 4px;
+            background: rgba(255, 255, 255, 20);
+            border-radius: 2px;
         }
         QSlider::handle:horizontal {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 #5a9fd4, stop:1 #4080c0);
-            border: 1px solid #2060a0;
-            width: 16px;
-            margin: -6px 0;
-            border-radius: 8px;
+            background: #4ade80;
+            border: 2px solid #22c55e;
+            width: 14px;
+            margin: -5px 0;
+            border-radius: 7px;
         }
         QSlider::handle:horizontal:hover {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 #6ab0e4, stop:1 #5090d0);
+            background: #86efac;
+            border-color: #4ade80;
         }
         QSlider::sub-page:horizontal {
             background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 #4a90d9, stop:1 #67e6dc);
-            border-radius: 3px;
+                stop:0 #16a34a, stop:1 #4ade80);
+            border-radius: 2px;
         }
     """
 
-
 def get_checkbox_style():
-    """Zwraca styl CSS dla checkboxów"""
     return """
         QCheckBox {
-            spacing: 8px;
-            color: #e0e8f0;
-            font-size: 13px;
+            spacing: 12px;
+            color: #d1d5db;
+            font-size: 14px;
+            font-family: 'Segoe UI';
             background: transparent;
         }
         QCheckBox::indicator {
             width: 18px;
             height: 18px;
             border-radius: 4px;
-            border: 2px solid #4a5a6a;
-            background: #2a3a4a;
+            border: 1px solid rgba(255, 255, 255, 40);
+            background: rgba(30, 36, 50, 150);
         }
         QCheckBox::indicator:hover {
-            border-color: #5a9fd4;
-            background: #3a4a5a;
+            border-color: rgba(74, 222, 128, 180);
+            background: rgba(40, 48, 65, 150);
         }
         QCheckBox::indicator:checked {
             background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                stop:0 #4a90d9, stop:1 #67e6dc);
-            border-color: #4a90d9;
-        }
-        QCheckBox::indicator:checked:hover {
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                stop:0 #5aa0e9, stop:1 #77f6ec);
+                stop:0 #16a34a, stop:1 #4ade80);
+            border-color: #22c55e;
         }
     """
-
 
 def get_button_style(color_type="primary"):
-    """
-    Zwraca styl CSS dla przycisków
-    
-    Args:
-        color_type: "primary", "danger", lub "secondary"
-    """
-    if color_type == "primary":
-        base_color = "#4a90d9"
-        hover_color = "#5aa0e9"
-        pressed_color = "#3a80c9"
-    elif color_type == "danger":
-        base_color = "#d94a4a"
-        hover_color = "#e95a5a"
-        pressed_color = "#c93a3a"
-    else:  # secondary
-        base_color = "#5a6a7a"
-        hover_color = "#6a7a8a"
-        pressed_color = "#4a5a6a"
+    if color_type == "primary" or color_type == "green":
+        bg = "rgba(34, 197, 94, 0.22)"
+        bg_hover = "rgba(34, 197, 94, 0.38)"
+        border = "rgba(74, 222, 128, 0.55)"
+        border_hover = "rgba(74, 222, 128, 0.9)"
+        text_color = "#86efac"
+    elif color_type == "danger" or color_type == "red":
+        bg = "rgba(160, 45, 45, 130)"
+        bg_hover = "rgba(200, 60, 60, 190)"
+        border = "rgba(255, 100, 100, 120)"
+        border_hover = "rgba(255, 150, 150, 180)"
+        text_color = "#fecdd3"
+    else:  # neutral / default
+        bg = "rgba(255, 255, 255, 0.06)"
+        bg_hover = "rgba(255, 255, 255, 0.12)"
+        border = "rgba(255, 255, 255, 0.16)"
+        border_hover = "rgba(255, 255, 255, 0.3)"
+        text_color = "#e2e8f0"
     
     return f"""
         QPushButton {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 {base_color}, stop:1 {pressed_color});
-            color: white;
-            border: none;
-            padding: 8px 16px;
+            background: {bg};
+            color: {text_color};
+            border: 1px solid {border};
+            padding: 8px 20px;
             border-radius: 6px;
-            font-weight: bold;
-            font-size: 13px;
+            font-weight: 600;
+            font-size: 14px;
+            font-family: 'Segoe UI';
         }}
         QPushButton:hover {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 {hover_color}, stop:1 {base_color});
+            background: {bg_hover};
+            border-color: {border_hover};
+            color: #ffffff;
         }}
         QPushButton:pressed {{
-            background: {pressed_color};
+            background: rgba(0, 0, 0, 120);
         }}
     """
 
-
 def get_radio_button_style():
-    """Zwraca styl CSS dla przycisków radiowych"""
-    return """
-        QRadioButton {
-            spacing: 6px;
-            color: #e0e8f0;
-            font-size: 12px;
-            padding: 4px;
-            background: transparent;
-        }
-        QRadioButton::indicator {
-            width: 16px;
-            height: 16px;
-            border-radius: 8px;
-            border: 2px solid #4a5a6a;
-            background: #2a3a4a;
-        }
-        QRadioButton::indicator:hover {
-            border-color: #5a9fd4;
-            background: #3a4a5a;
-        }
-        QRadioButton::indicator:checked {
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                stop:0 #4a90d9, stop:1 #67e6dc);
-            border-color: #4a90d9;
-        }
-        QRadioButton::indicator:checked:hover {
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                stop:0 #5aa0e9, stop:1 #77f6ec);
-        }
-    """
+    return ""

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Moduł zarządzający aktualizacjami danych z API
 """
 from PyQt6.QtCore import QTimer, QThread, pyqtSignal, QObject
@@ -233,7 +233,11 @@ class UpdateManager(QObject):
             elapsed_time = (current_time - start_datetime).total_seconds() / 60  # w minutach
             remaining_time = (end_datetime - current_time).total_seconds() / 60  # w minutach
             
-            self.widget.left_text = f"{round(remaining_time)}min → {self.nextLesson.get('syllabus', '-')}"
+            if remaining_time < 0 or (self.currentLesson and self.currentLesson.get("syllabus", "") == "Brak danych"):
+                self.widget.left_text = "Brak dalszych zajęć"
+                self.widget.right_text = ""
+            else:
+                self.widget.left_text = f"{round(remaining_time)}min → {self.nextLesson.get('name', '-')}"
             # Jeśli sala jest pusta (np. dla przerwy), wyświetl "-"
             hall = self.nextLesson.get("hall", "")
             self.widget.right_text = hall if hall else "-"

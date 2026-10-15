@@ -18,7 +18,7 @@ class ModernProgressBar(QWidget):
         # Timer for shine animation (~60 FPS)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_shine)
-        self.timer.start(100)  # ~10 FPS (Further reduced to save CPU)
+        # self.timer.start(100)  # Zatrzymane dla optymalizacji zasobw  # ~10 FPS (Further reduced to save CPU)
     
     def update_shine(self):
         """Update shine position for animation"""

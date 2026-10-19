@@ -16,6 +16,22 @@ from src.overlay.toggle_button import ToggleButton
 from src.tray import Tray
 from src.settings.settings_window import SettingsWindow
 
+if sys.platform == "win32":
+    import ctypes
+    from ctypes import wintypes
+    try:
+        user32 = ctypes.windll.user32
+        user32.SetWindowPos.argtypes = [
+            wintypes.HWND, wintypes.HWND,
+            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+            wintypes.UINT
+        ]
+        user32.SetWindowPos.restype = wintypes.BOOL
+    except Exception:
+        user32 = None
+else:
+    user32 = None
+
 class OverlayWidget(QWidget):
     def __init__(self, title, left_text, right_text, room_text="-", progress=0.0):
         super().__init__()
@@ -102,6 +118,11 @@ class OverlayWidget(QWidget):
         # Enable mouse tracking for hover events
         self.setMouseTracking(True)
 
+        # Timer do ciągłego wymuszania najwyższego priorytetu Z-order (Always on Top nad wszystkimi aplikacjami)
+        self.topmost_timer = QTimer(self)
+        self.topmost_timer.timeout.connect(self.bring_to_top)
+        self.topmost_timer.start(500)
+
     def open_settings(self):
         """Otwiera okno ustawień"""
         if self.settings_window:
@@ -113,6 +134,8 @@ class OverlayWidget(QWidget):
         self.settings_manager.stop_timers()
         if hasattr(self, 'cursor_timer') and self.cursor_timer.isActive():
             self.cursor_timer.stop()
+        if hasattr(self, 'topmost_timer') and self.topmost_timer.isActive():
+            self.topmost_timer.stop()
         
         if self.settings_window:
             self.settings_window.close()
@@ -410,6 +433,7 @@ class OverlayWidget(QWidget):
         if "clickthrough" in settings:
             self._clickthrough_enabled = settings["clickthrough"]
             self.apply_clickthrough_state()
+        self.bring_to_top()
         if "drag_enabled" in settings:
             self.drag_enabled = settings["drag_enabled"]
         if "scaling_enabled" in settings:
@@ -428,6 +452,7 @@ class OverlayWidget(QWidget):
                 | Qt.WindowType.WindowTransparentForInput
             )
             self.show()
+            self.bring_to_top()
         
         self.update_ui_states()
         self.settings_manager.request_save_settings()
@@ -442,6 +467,7 @@ class OverlayWidget(QWidget):
                 | Qt.WindowType.Tool
             )
             self.show()
+            self.bring_to_top()
         
         self.update_ui_states()
         self.settings_manager.request_save_settings()
@@ -485,6 +511,7 @@ class OverlayWidget(QWidget):
         
         if was_visible:
             self.show()
+            self.bring_to_top()
             self.update()
 
     # ===== Drag =====
@@ -523,6 +550,7 @@ class OverlayWidget(QWidget):
             self.show()
             # Zastosuj aktualny stan clickthrough
             self.apply_clickthrough_state()
+        self.bring_to_top()
 
     # ===== Opacity / Progress =====
     def update_opacity(self, value):
@@ -559,6 +587,31 @@ class OverlayWidget(QWidget):
             self.lbl_place.setText(self.right_text)
         if hasattr(self, 'lbl_room'):
             self.lbl_room.setText(self.room_text)
+
+    def bring_to_top(self):
+        """Wymusza najwyższą pozycję w Z-order (HWND_TOPMOST) nad wszystkimi aplikacjami (np. przeglądarką)"""
+        if not self.isVisible():
+            return
+        # Jeśli okno ustawień jest otwarte, nie przykrywaj go
+        if hasattr(self, 'settings_window') and self.settings_window and self.settings_window.isVisible():
+            return
+        if user32:
+            try:
+                hwnd = int(self.winId())
+                # HWND_TOPMOST = -1
+                # SWP_NOSIZE (0x0001) | SWP_NOMOVE (0x0002) | SWP_NOACTIVATE (0x0010)
+                user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)
+            except Exception:
+                pass
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.bring_to_top()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if hasattr(event, 'type') and event.type() in (event.Type.WindowStateChange, event.Type.ActivationChange):
+            self.bring_to_top()
 
     # ===== Malowanie (delegacja do ui_renderer) =====
     def paintEvent(self, event):
@@ -615,6 +668,7 @@ class OverlayWidget(QWidget):
         
         # Zastosuj stan clickthrough
         self.apply_clickthrough_state()
+        self.bring_to_top()
         
         # Wczytaj pozycję
         pos = settings.get("position")
